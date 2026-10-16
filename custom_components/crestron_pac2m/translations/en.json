@@ -4,11 +4,17 @@
       "user": {
         "title": "Crestron PAC2M",
         "description": "Adding the integration does NOT change the processor. It starts passive: it sends nothing and the lights stay unavailable until you choose 'Go stand-alone' under Configure.",
-        "data": {"host": "Crestron processor IP address"}
+        "data": {
+          "host": "Crestron processor IP address"
+        }
       }
     },
-    "error": {"invalid_host": "Enter a valid IPv4 address"},
-    "abort": {"already_configured": "This processor is already configured"}
+    "error": {
+      "invalid_host": "Enter a valid IPv4 address"
+    },
+    "abort": {
+      "already_configured": "This processor is already configured"
+    }
   },
   "options": {
     "step": {
@@ -24,26 +30,77 @@
       "standalone": {
         "title": "Go stand-alone",
         "description": "Points the Crestron at Home Assistant, reboots it (about 2-4 minutes, lights keep their levels and wall keypads keep working), then moves the existing light entity ids to this integration. The old Control4 lights are renamed and disabled. If Home Assistant never comes online the change is undone automatically. Tick 'Preview only' to see the plan without changing anything.",
-        "data": {"dry_run": "Preview only (change nothing)"}
+        "data": {
+          "dry_run": "Preview only (change nothing)"
+        }
       },
       "control4": {
         "title": "Return to Control4",
         "description": "Finds the Control4 address (currently: {control4_host}), points the Crestron back at it, reboots it, restores the original Control4 light entity ids and then disables this integration. Tick 'Preview only' to see the plan without changing anything.",
-        "data": {"dry_run": "Preview only (change nothing)"}
+        "data": {
+          "dry_run": "Preview only (change nothing)"
+        }
       },
       "settings": {
         "title": "Address overrides",
         "description": "Only needed if the addresses cannot be found automatically. Leave empty for automatic.",
-        "data": {"control4_host": "Control4 server IP", "ha_host": "Home Assistant IP"}
+        "data": {
+          "control4_host": "Control4 server IP",
+          "ha_host": "Home Assistant IP"
+        }
       }
     },
-    "progress": {"switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window."},
-    "abort": {"result": "{result}"}
+    "progress": {
+      "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window."
+    },
+    "abort": {
+      "result": "{result}"
+    }
   },
   "services": {
-    "go_standalone": {"name": "Go stand-alone", "description": "Point the processor at Home Assistant and take over the Control4 light entity ids.", "fields": {"dry_run": {"name": "Dry run", "description": "Only describe what would happen."}}},
-    "return_to_control4": {"name": "Return to Control4", "description": "Point the processor back at Control4, restore its entities and disable this integration.", "fields": {"dry_run": {"name": "Dry run", "description": "Only describe what would happen."}}},
-    "adopt_entity_ids": {"name": "Adopt entity ids", "description": "Give the existing Control4 light entity ids to this integration.", "fields": {"dry_run": {"name": "Dry run", "description": "Only describe what would happen."}}},
-    "release_entity_ids": {"name": "Release entity ids", "description": "Give the light entity ids back to Control4.", "fields": {"dry_run": {"name": "Dry run", "description": "Only describe what would happen."}}}
+    "go_standalone": {
+      "name": "Go stand-alone",
+      "description": "Point the processor at Home Assistant and take over the Control4 light entity ids.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Only describe what would happen."
+        }
+      }
+    },
+    "return_to_control4": {
+      "name": "Return to Control4",
+      "description": "Point the processor back at Control4, restore its entities and disable this integration.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Only describe what would happen."
+        }
+      }
+    },
+    "adopt_entity_ids": {
+      "name": "Adopt entity ids",
+      "description": "Give the existing Control4 light entity ids to this integration.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Only describe what would happen."
+        }
+      }
+    },
+    "release_entity_ids": {
+      "name": "Release entity ids",
+      "description": "Give the light entity ids back to Control4.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Only describe what would happen."
+        }
+      }
+    },
+    "resync": {
+      "name": "Resync",
+      "description": "Ask the processor for a fresh state dump (levels and names)."
+    }
   }
 }

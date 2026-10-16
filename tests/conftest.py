@@ -142,6 +142,8 @@ class FakeProcessor:
                 self.keepalive_seen = True
                 self.online = True
                 self.dump()
+            elif ev.kind == "digital" and ev.join == 4000 and ev.level == 0:
+                self.keepalive_seen = False             # a falling edge ends the "session"; the next rising edge dumps again
             elif ev.kind == "analog" and self.keepalive_seen:
                 if self.levels.get(ev.join) != ev.level:
                     self.levels[ev.join] = ev.level
@@ -186,6 +188,8 @@ async def processor(monkeypatch):
     monkeypatch.setattr(client, "RETRY_SECONDS", 0.2)
     monkeypatch.setattr(client, "SESSION_TIMEOUT_SECONDS", 5)
     monkeypatch.setattr(client, "COMMAND_SPACING_SECONDS", 0)
+    monkeypatch.setattr(client, "LOOP_TICK_SECONDS", 0.05)
+    monkeypatch.setattr(client, "RESYNC_WAIT_SECONDS", 0.6)
     monkeypatch.setattr(operations, "DISABLE_DELAY_SECONDS", 0.2)
     monkeypatch.setattr(pkg, "LABEL_CHECK_DELAY_SECONDS", 0.3)
     proc = FakeProcessor()

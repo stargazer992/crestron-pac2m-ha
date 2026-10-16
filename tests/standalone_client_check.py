@@ -20,6 +20,8 @@ client_mod.KEEPALIVE_SECONDS = 0.3
 client_mod.RETRY_SECONDS = 0.2
 client_mod.SESSION_TIMEOUT_SECONDS = 1.0
 client_mod.COMMAND_SPACING_SECONDS = 0.0
+client_mod.LOOP_TICK_SECONDS = 0.05
+client_mod.RESYNC_WAIT_SECONDS = 60       # this check's fake always dumps, no resync wanted
 
 FAKE_PORT, CLIENT_LISTEN, CLIENT_SRC = 41901, 41902, 41903
 results = []

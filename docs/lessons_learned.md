@@ -164,3 +164,9 @@ EOF
 ## 13. Label check bugs found live (2026-10-16)
 - Notification loop: the check called the client's link-changed notification to refresh the Link sensor, which re-triggered the check (a notification every few seconds). Fix: refresh the sensor with a dispatcher signal, run the check only on the False -> True link transition, and never send the same result twice.
 - Every light has a room entry at name id (light id - 1), so the room of join j is the entry at id `2*(j-0x100)-2`. On the real processor the rooms of all 40 table rows matched the grouping, an independent confirmation of the join table.
+
+## 14. Home Assistant restart while the processor session is alive: no state dump (found live, 2026-10-16)
+- After a Home Assistant restart the link came back (the processor acked ping + join 4000) but **no hello and no state dump** arrived: 2 frames in, 2 out, every light "unknown" until its first change. The processor still considered the session alive.
+- Commands and feedback still work; only the initial levels and names are missing.
+- v1.3.0 asks for the dump: if the link is up and no levels arrived within 10 s, send digital join 4000 LOW then HIGH (up to 3 times). Service `crestron_pac2m.resync` does the same on demand.
+- The "rising edge on join 4000 starts a dump" idea is a hypothesis built from the Control4 startup capture. Verify on the real processor and update this note with the result.
