@@ -1,5 +1,7 @@
 # Crestron lighting: lessons learned on controlling it from Home Assistant (Oct 2026)
 
+Repository (code, README, HACS): https://github.com/stargazer992/crestron-pac2m-ha
+
 Everything below was learned on Robert's network on 2026-10-16. "Verified" means it was observed against the real processor; "unverified" means inferred.
 
 ## 1. The setup

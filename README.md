@@ -1,5 +1,7 @@
 # Crestron PAC2M Lighting for Home Assistant
 
+**Repository:** https://github.com/stargazer992/crestron-pac2m-ha (HACS custom repository; updates need a GitHub release)
+
 Controls a Crestron **PAC2M (2-Series) lighting processor** directly from Home Assistant over its CIP/UDP protocol,
 so the Control4 server is no longer needed for lighting. Built for the Fleur de Lis house (40 dimmers/relays),
 but the protocol notes and tools apply to any PAC2M.
@@ -53,10 +55,10 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | Theater joins 0x124-0x12A | Verified by watching the lights |
 | IP table edits + reboot + Control4 reconnect | Verified (rollback test, Oct 2026) |
 | All other joins (33 lights) | Derived from the Control4 project; spot-check after cutover |
-| Family Room fan (0x106) | Never responded under Control4 either |
+| Family Room fan (0x106) | Works on/off from Home Assistant (never worked under Control4); speed control untested |
 | Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`) |
 | Integration inside Home Assistant 2026.10 | 9 automated tests against a simulated processor + console (`tests/`) |
-| Integration against the real processor | **Not yet run** - first real run is the cutover |
+| Integration against the real processor | Verified: cutover done 2026-10-16, all 40 lights respond (v1.5.0) |
 | `device_id` for the new IP table entry | Left to the default (the Control4 entry also has none) |
 
 ## Documentation
