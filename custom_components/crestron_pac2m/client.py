@@ -76,6 +76,7 @@ class CrestronClient:
         self.connected = False
         self.dump_complete = False                 # True a few seconds after a hello: joins still without a level are at 0 (the dump omits them)
         self._dump_timer: asyncio.TimerHandle | None = None
+        self._digital_listeners: set[Callable[[int, int], None]] = set()   # callback(join, 0/1) for every digital join change
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
         self.frames_rx = 0
         self.frames_tx = 0
@@ -97,6 +98,11 @@ class CrestronClient:
         """Call callback whenever the link goes up or down. Returns the remove function."""
         self._link_listeners.add(callback)
         return lambda: self._link_listeners.discard(callback)
+
+    def add_digital_listener(self, callback: Callable[[int, int], None]) -> Callable[[], None]:
+        """Call callback(join, level) for every digital join the processor sends (keypad presses, feedback pairs). Returns the remove function."""
+        self._digital_listeners.add(callback)
+        return lambda: self._digital_listeners.discard(callback)
 
     def add_join_listener(self, join: int, callback: JoinCallback) -> Callable[[], None]:
         """Call callback(join) whenever the level of join changes. Returns the remove function."""
@@ -235,6 +241,15 @@ class CrestronClient:
                 self._notify_join(event.join)
             elif event.join not in self.levels:
                 self.levels[event.join] = event.level
+        elif event.kind == "digital":
+            # Keypad button presses probably arrive here. Held back until the state dump has settled so the
+            # initial dump does not flood the event bus; the keep-alive echo is ignored.
+            if self.dump_complete and event.join != KEEPALIVE_DIGITAL_JOIN:
+                for listener in list(self._digital_listeners):
+                    try:
+                        listener(event.join, event.level)
+                    except Exception:  # noqa: BLE001 - a bad listener must never stop the session
+                        _LOGGER.exception("Digital listener failed")
         elif event.kind == "name":
             self.labels[event.join] = event.text
         elif event.kind == "room":

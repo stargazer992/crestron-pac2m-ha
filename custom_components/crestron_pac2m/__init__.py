@@ -28,6 +28,7 @@ from .client import CrestronClient
 from .const import (
     ADOPT_DRY_RUN_DEFAULT,
     CONF_HOST,
+    EVENT_DIGITAL,
     CONF_MODE,
     CRESTRON_PORT,
     DEFAULT_MODE,
@@ -116,6 +117,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
         await client.async_stop()                    # never leave sockets or tasks behind
         raise
     entry.async_on_unload(entry.add_update_listener(_options_updated))
+
+    @callback
+    def _digital(join: int, level: int) -> None:
+        # Groundwork for wall keypads: every digital join change becomes an HA event.
+        # Developer Tools > Events > listen to "crestron_pac2m_digital", press a keypad button, note the join.
+        hass.bus.async_fire(EVENT_DIGITAL, {"join": join, "join_hex": f"0x{join:04x}", "state": "high" if level else "low"})
+
+    entry.async_on_unload(client.add_digital_listener(_digital))
     return True
 
 

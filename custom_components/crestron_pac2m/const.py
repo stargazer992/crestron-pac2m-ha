@@ -111,3 +111,5 @@ LIGHTS: tuple[tuple[int, str, str, str, str], ...] = (
     (0x012A, "light.interior_foyer_staircase_basement_recessed", "Dimmer", "Theater", "Stair Lights"),  # Theater / Stair Lights (Control4 id 249)
     (0x012C, "light.dimmer_art_lights_dining_room", "Dimmer", "Living & Dining", "Dining Art Lights"),  # Living & Dining / Art Lights (Control4 id 402)
 )
+
+EVENT_DIGITAL = "crestron_pac2m_digital"   # fired on the HA bus for every digital join change (keypad groundwork)

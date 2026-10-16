@@ -176,3 +176,6 @@ EOF
 
 ## 15. Lights missing from the state dump are at 0 (v1.5.0)
 After a fresh dump 17 of 40 lights had no level and showed "unknown". Other automations (the day_lights PyScript) treat "unknown" as unavailable and skipped them (e.g. the floor outlet relay that powers Hue standing lamps), which made dependent devices fail. Cause: the dump only lists lights that are above 0. Fix: DUMP_SETTLE_SECONDS after a hello, joins without a level are reported as off (attribute `crestron_level_source: assumed_off`). Unverified for every light physically; the first real feedback replaces it.
+
+## 16. Keypad groundwork (v1.6.0)
+Every digital join the processor sends (after the state dump has settled; the keep-alive join 4000 is ignored) is fired on the HA bus as event `crestron_pac2m_digital` with `join`, `join_hex` and `state` (high/low). To map a keypad: Developer Tools > Events > listen to `crestron_pac2m_digital`, press one button, note the join. Light on/off feedback also produces digital pairs (see section on feedback), so those joins can be ignored. UNVERIFIED until a real keypad press has been captured.
