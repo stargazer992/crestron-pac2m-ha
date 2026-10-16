@@ -1,13 +1,17 @@
 {
   "domain": "crestron_pac2m",
   "name": "Crestron PAC2M Lighting",
-  "codeowners": [],
+  "codeowners": [
+    "@stargazer992"
+  ],
   "config_flow": true,
-  "dependencies": ["network"],
-  "documentation": "https://github.com/",
+  "dependencies": [
+    "network"
+  ],
+  "documentation": "https://github.com/stargazer992/crestron-pac2m-ha",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/",
+  "issue_tracker": "https://github.com/stargazer992/crestron-pac2m-ha/issues",
   "requirements": [],
   "version": "0.1.0"
 }
