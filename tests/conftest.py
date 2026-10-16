@@ -120,6 +120,8 @@ class FakeProcessor:
         for join, text in self.names.items():
             t = text.encode()
             self.send_data(bytes([len(t) + 3, 0x12, 2 * (join - 0x100) - 1]) + t)
+            r = b"Theater"                                   # the room entry (even id) that follows each light name
+            self.send_data(bytes([len(r) + 3, 0x12, 2 * (join - 0x100)]) + r)
         for join, level in self.levels.items():
             self.send_data(protocol.analog_payload(join, level))
 

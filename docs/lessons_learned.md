@@ -155,3 +155,8 @@ EOF
 - Control4 disables/re-enables: a re-enabled entity only comes back after the Control4 config entry reloads (the release step schedules that reload).
 - The Control4 server address is read from the Control4 config entry (`host`); an override exists under Configure > Address overrides.
 - Tests: `pytest-homeassistant-custom-component` blocks sockets by default; use the `socket_enabled` fixture for the fake processor.
+
+## 12. Name dump: light names are odd ids, room names are even ids (found at the first real cutover, 2026-10-16)
+- The processor sends 45 name entries, not 41: after each light name (odd id) comes a room name (even id). Both map onto the same join number with `0x100 + (id + 1) / 2`.
+- Using every entry as a light label made the room name overwrite the light name, so the label check reported 37 false mismatches. Only odd ids are light labels (fixed in v1.2.0).
+- First real cutover result: `remslave 6 192.168.104.25`, `addslave 6 192.168.104.120`, reboot -> processor ONLINE with Home Assistant within about 1 minute, ~370 frames each way, all 40 lights available, original entity ids kept.

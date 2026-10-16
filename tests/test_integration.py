@@ -192,3 +192,12 @@ def test_label_compare_unit():
     report = compare(lights, {0x101: "garage  & portico flood", 0x102: "Back Porch"})
     assert report.ok and report.missing == [(0x103, "light.c", "Rope")] and report.checked == 3
     assert not compare(lights, {0x101: "Other"}).ok
+
+
+def test_room_entries_do_not_overwrite_light_labels():
+    """Real processor: every light name (odd id) is followed by a room name (even id) with the same join number."""
+    from custom_components.crestron_pac2m import protocol
+    light = protocol.decode_payload(bytes([len(b"Downlights") + 3, 0x12, 0x47]) + b"Downlights")
+    room = protocol.decode_payload(bytes([len(b"Theater") + 3, 0x12, 0x48]) + b"Theater")
+    assert (light.kind, light.join, light.text) == ("name", 0x124, "Downlights")
+    assert (room.kind, room.join, room.text) == ("room", 0x124, "Theater")

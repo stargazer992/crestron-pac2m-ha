@@ -46,7 +46,7 @@ class Frame:
 
 @dataclass(frozen=True)
 class Event:
-    """One decoded payload. kind: analog | digital | hello | name | other."""
+    """One decoded payload. kind: analog | digital | hello | name (light) | room | other."""
 
     kind: str
     join: int = 0
@@ -112,7 +112,10 @@ def decode_payload(payload: bytes) -> Event:
     # name entries: <len> 12 <id> <text>. Checked first because a 1-letter name has len 4 like an analog frame.
     if len(payload) >= 4 and payload[1] == NAME_MARKER:
         text = payload[3: 1 + kind].decode("latin-1").rstrip("\x00").strip()
-        return Event("name", name_id=payload[2], text=text, join=name_id_to_join(payload[2]))
+        # odd ids are light names; even ids are room names (seen on the real processor, Oct 2026) and must NOT
+        # be used as light labels - they map onto the same join number and would overwrite the light name
+        kind_name = "name" if payload[2] % 2 == 1 else "room"
+        return Event(kind_name, name_id=payload[2], text=text, join=name_id_to_join(payload[2]))
     if kind == KIND_ANALOG and len(payload) >= 5:
         return Event("analog", join=(payload[1] << 8) | payload[2], level=(payload[3] << 8) | payload[4])
     if kind == KIND_DIGITAL and len(payload) >= 4:
