@@ -97,10 +97,6 @@
           "description": "Only describe what would happen."
         }
       }
-    },
-    "resync": {
-      "name": "Resync",
-      "description": "Ask the processor for a fresh state dump (levels and names)."
     }
   }
 }

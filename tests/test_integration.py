@@ -206,26 +206,22 @@ def test_room_entries_do_not_overwrite_light_labels():
     assert (room.kind, room.name_id, room.text) == ("room", 0x46, "Theater")
 
 
-async def test_restart_while_processor_session_alive_gets_resync(hass, processor):
-    """After a Home Assistant restart the processor does not dump again; the client must ask for it (join 4000 edge)."""
-    entry, _ = await setup_entry(hass)
-    make_legacy_entity(hass)
-    result = await async_go_standalone(hass, entry, False)
-    assert result.ok, result.steps
-    assert await wait_state(hass, LEGACY, lambda s: s.state in ("on", "off"))
-    # simulate the restart: reload the entry; the fake still believes the session is alive (keepalive_seen stays True)
-    assert processor.keepalive_seen
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    client = entry.runtime_data.client
-    assert await wait_state(hass, LEGACY, lambda s: s.state in ("on", "off"), timeout=8), "resync never produced a state dump"
-    assert client.resyncs >= 1 and client.levels
-
-
-async def test_manual_resync_service(hass, processor):
-    entry, _ = await setup_entry(hass)
-    make_legacy_entity(hass)
-    await async_go_standalone(hass, entry, False)
-    before = entry.runtime_data.client.resyncs
-    await hass.services.async_call(DOMAIN, "resync", {}, blocking=True)
-    assert entry.runtime_data.client.resyncs == before + 1
+async def test_state_restored_after_restart_without_dump(hass, processor):
+    """Real behavior: after a restart the processor sends no dump. Lights must start from their last known state."""
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False                     # the real processor ignores the join-4000 toggle
+    mock_restore_cache(hass, [
+        State("light.crestron_pac2m_theater_sconces_2", "on", {"brightness": 128}),
+        State("light.crestron_pac2m_theater_downlights", "off"),
+    ])
+    entry, _ = await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "on" and s.attributes["brightness"] == 128, timeout=5)
+    state = hass.states.get("light.crestron_pac2m_theater_downlights")
+    assert state.state == "off" and state.attributes["crestron_level_source"] == "restored"
+    # the first real feedback replaces the restored value
+    import custom_components.crestron_pac2m.protocol as protocol
+    processor.send_data(protocol.analog_payload(0x124, 0xFFFF))
+    assert await wait_state(hass, "light.crestron_pac2m_theater_downlights", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")

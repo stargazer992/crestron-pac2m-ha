@@ -89,12 +89,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 hass.config_entries.async_schedule_reload(c4.entry_id)
         return {"messages": messages}
 
-    async def _resync(call: ServiceCall) -> dict:
-        client = _loaded_entry(hass).runtime_data.client
-        await client.async_resync()
-        return {"requested": True}
-
-    hass.services.async_register(DOMAIN, "resync", _resync, supports_response=SupportsResponse.OPTIONAL)
     for name, handler in (
         ("go_standalone", _go_standalone),
         ("return_to_control4", _return_to_control4),

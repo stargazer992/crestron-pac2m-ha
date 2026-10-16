@@ -20,8 +20,6 @@ SESSION_TIMEOUT_SECONDS = 90            # no frame (data or ack) for this long =
 COMMAND_SPACING_SECONDS = 0.05          # pause between commands so a scene does not flood the 2-series processor
 KEEPALIVE_DIGITAL_JOIN = 4000           # digital join the keep-alive sets high
 LOOP_TICK_SECONDS = 1.0                 # how often the session loop wakes up (keep-alive, timeout and resync checks)
-RESYNC_WAIT_SECONDS = 10                # link is up but no state dump yet: after this long, ask the processor for a fresh dump
-RESYNC_ATTEMPTS = 3                     # how many times to ask (join 4000 low, then high) before giving up
 
 # ---- operating mode ----
 CONF_MODE = "mode"

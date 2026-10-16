@@ -166,7 +166,8 @@ EOF
 - Every light has a room entry at name id (light id - 1), so the room of join j is the entry at id `2*(j-0x100)-2`. On the real processor the rooms of all 40 table rows matched the grouping, an independent confirmation of the join table.
 
 ## 14. Home Assistant restart while the processor session is alive: no state dump (found live, 2026-10-16)
-- After a Home Assistant restart the link came back (the processor acked ping + join 4000) but **no hello and no state dump** arrived: 2 frames in, 2 out, every light "unknown" until its first change. The processor still considered the session alive.
-- Commands and feedback still work; only the initial levels and names are missing.
-- v1.3.0 asks for the dump: if the link is up and no levels arrived within 10 s, send digital join 4000 LOW then HIGH (up to 3 times). Service `crestron_pac2m.resync` does the same on demand.
-- The "rising edge on join 4000 starts a dump" idea is a hypothesis built from the Control4 startup capture. Verify on the real processor and update this note with the result.
+- After a Home Assistant restart the link comes back (the processor acks ping + join 4000) but **no hello and no state dump** arrives: 2 frames in, 2 out, every light "unknown" until its first change. The processor still considers the session alive. Commands and feedback keep working.
+- The dump is sent only when the processor sees a NEW session: after its own reboot (OFFLINE -> ONLINE for the table entry), or after the peer was offline long enough. Probe 4 got a dump every run because Control4 had been unplugged (peer OFFLINE).
+- **Tried and rejected:** toggling keep-alive join 4000 low then high (v1.3.0, automatic and via a manual service) does NOT start a dump. That code was removed.
+- Solution in v1.4.0: lights restore their last known level at startup (RestoreEntity, attribute `crestron_level_source` = restored / processor); the first feedback from the processor replaces it. Real changes while HA was down are missed until the light changes again.
+- Not yet tried: pausing the keep-alive for a few minutes so the processor drops the peer (then hello + dump on return); `progreset -p:01` over the console (restarts the SIMPL program without a full reboot); a full processor reboot (known to work).

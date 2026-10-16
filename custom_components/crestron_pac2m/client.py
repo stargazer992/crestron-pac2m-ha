@@ -25,8 +25,6 @@ from .const import (
     KEEPALIVE_SECONDS,
     LISTEN_PORT,
     LOOP_TICK_SECONDS,
-    RESYNC_ATTEMPTS,
-    RESYNC_WAIT_SECONDS,
     RETRY_SECONDS,
     SESSION_TIMEOUT_SECONDS,
     SOURCE_PORT,
@@ -78,9 +76,6 @@ class CrestronClient:
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
         self.frames_rx = 0
         self.frames_tx = 0
-        self.resyncs = 0                           # resync requests since the link came up
-        self._connected_at = 0.0
-        self._last_resync = 0.0
         self._last_keepalive = -1e9
         self._seq = 0
         self._rx: asyncio.DatagramTransport | None = None
@@ -161,7 +156,7 @@ class CrestronClient:
 
     # ---------- keep-alive loop ----------
     async def _run(self) -> None:
-        """Session loop: keep-alive, silence timeout, and a resync when the link is up but no state dump arrived."""
+        """Session loop: keep-alive and silence timeout."""
         while True:
             try:
                 now = time.monotonic()
@@ -170,14 +165,6 @@ class CrestronClient:
                     if now - self._last_keepalive >= interval:
                         self._last_keepalive = now
                         await self._send_keepalive()
-                    if (
-                        self.connected
-                        and not self.levels
-                        and self.resyncs < RESYNC_ATTEMPTS
-                        and now - self._connected_at >= RESYNC_WAIT_SECONDS
-                        and now - self._last_resync >= RESYNC_WAIT_SECONDS
-                    ):
-                        await self.async_resync()
                 if self.connected and now - self.last_rx > SESSION_TIMEOUT_SECONDS:
                     _LOGGER.warning("No frame from the Crestron for %s s, marking lights unavailable", SESSION_TIMEOUT_SECONDS)
                     self._set_connected(False)
@@ -186,19 +173,6 @@ class CrestronClient:
             except Exception:  # noqa: BLE001 - never let the loop die
                 _LOGGER.exception("Session loop error, continuing")
             await asyncio.sleep(LOOP_TICK_SECONDS)
-
-    async def async_resync(self) -> None:
-        """Ask for a fresh state dump: toggle the keep-alive join (4000) low, then high again.
-
-        After a Home Assistant restart the processor still considers the session alive and does not send the
-        dump again; the rising edge on join 4000 is what starts a new one (hypothesis, verify on the real processor).
-        """
-        self.resyncs += 1
-        self._last_resync = time.monotonic()
-        _LOGGER.info("Asking the Crestron for a fresh state dump (attempt %s)", self.resyncs)
-        await self._send_payload(protocol.digital_payload(KEEPALIVE_DIGITAL_JOIN, False))
-        await asyncio.sleep(0.5)
-        await self._send_payload(protocol.digital_payload(KEEPALIVE_DIGITAL_JOIN, True))
 
     async def _send_keepalive(self) -> None:
         await self._send_payload(protocol.PAYLOAD_PING)
@@ -266,9 +240,6 @@ class CrestronClient:
         if value == self.connected:
             return
         self.connected = value
-        if value:
-            self._connected_at = time.monotonic()
-            self.resyncs = 0
         _LOGGER.info("Crestron link is %s", "UP" if value else "DOWN")
         self.notify_link()
         if value:

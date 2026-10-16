@@ -23,4 +23,3 @@ release_entity_ids:
       default: true
       selector:
         boolean:
-resync:
