@@ -22,6 +22,7 @@ from .const import (
     COMMAND_SPACING_SECONDS,
     CRESTRON_PORT,
     KEEPALIVE_DIGITAL_JOIN,
+    DUMP_SETTLE_SECONDS,
     KEEPALIVE_SECONDS,
     LISTEN_PORT,
     LOOP_TICK_SECONDS,
@@ -73,6 +74,8 @@ class CrestronClient:
         self.labels: dict[int, str] = {}           # analog join -> Crestron light label (from the name dump)
         self.room_names: dict[int, str] = {}       # name id (even) -> room name; the room of a light is the entry at (its id - 1)
         self.connected = False
+        self.dump_complete = False                 # True a few seconds after a hello: joins still without a level are at 0 (the dump omits them)
+        self._dump_timer: asyncio.TimerHandle | None = None
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
         self.frames_rx = 0
         self.frames_tx = 0
@@ -139,6 +142,9 @@ class CrestronClient:
 
     async def async_stop(self) -> None:
         """Stop the loop and close the sockets."""
+        if self._dump_timer is not None:
+            self._dump_timer.cancel()
+            self._dump_timer = None
         if self._task is not None:
             self._task.cancel()
             try:
@@ -235,6 +241,23 @@ class CrestronClient:
             self.room_names[event.name_id] = event.text
         elif event.kind == "hello":
             _LOGGER.info("Crestron hello received, session established")
+            self._schedule_dump_complete()
+
+    def _schedule_dump_complete(self) -> None:
+        """After the state dump has had time to arrive, lights without a reported level are treated as off."""
+        if self._dump_timer is not None:
+            self._dump_timer.cancel()
+        self.dump_complete = False
+        self._dump_timer = asyncio.get_running_loop().call_later(DUMP_SETTLE_SECONDS, self._dump_settled)
+
+    def _dump_settled(self) -> None:
+        self._dump_timer = None
+        self.dump_complete = True
+        _LOGGER.info("Crestron state dump settled (%d levels known); lights without a level are treated as off", len(self.levels))
+        self.notify_link()
+        for join in range(protocol.JOIN_BASE + 1, protocol.JOIN_BASE + 0x40):
+            if join not in self.levels:
+                self._notify_join(join)
 
     def _set_connected(self, value: bool) -> None:
         if value == self.connected:

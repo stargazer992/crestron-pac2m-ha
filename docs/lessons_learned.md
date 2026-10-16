@@ -171,3 +171,6 @@ EOF
 - **Tried and rejected:** toggling keep-alive join 4000 low then high (v1.3.0, automatic and via a manual service) does NOT start a dump. That code was removed.
 - Solution in v1.4.0: lights restore their last known level at startup (RestoreEntity, attribute `crestron_level_source` = restored / processor); the first feedback from the processor replaces it. Real changes while HA was down are missed until the light changes again.
 - Not yet tried: pausing the keep-alive for a few minutes so the processor drops the peer (then hello + dump on return); `progreset -p:01` over the console (restarts the SIMPL program without a full reboot); a full processor reboot (known to work).
+
+## 15. Lights missing from the state dump are at 0 (v1.5.0)
+After a fresh dump 17 of 40 lights had no level and showed "unknown". Other automations (the day_lights PyScript) treat "unknown" as unavailable and skipped them (e.g. the floor outlet relay that powers Hue standing lamps), which made dependent devices fail. Cause: the dump only lists lights that are above 0. Fix: DUMP_SETTLE_SECONDS after a hello, joins without a level are reported as off (attribute `crestron_level_source: assumed_off`). Unverified for every light physically; the first real feedback replaces it.

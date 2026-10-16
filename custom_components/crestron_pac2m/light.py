@@ -61,7 +61,11 @@ class CrestronLight(LightEntity, RestoreEntity):
     @property
     def _level(self) -> int | None:
         level = self._client.levels.get(self._join)
-        return level if level is not None else self._restored_level
+        if level is None:
+            level = self._restored_level
+        if level is None and self._client.dump_complete:
+            level = 0                                # not in the dump = off
+        return level
 
     @property
     def is_on(self) -> bool | None:
@@ -75,7 +79,7 @@ class CrestronLight(LightEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"crestron_join": f"0x{self._join:04X}", "crestron_label": self._client.labels.get(self._join, self._label), "crestron_level": self._level, "crestron_level_source": "processor" if self._join in self._client.levels else ("restored" if self._restored_level is not None else None)}
+        return {"crestron_join": f"0x{self._join:04X}", "crestron_label": self._client.labels.get(self._join, self._label), "crestron_level": self._level, "crestron_level_source": "processor" if self._join in self._client.levels else ("restored" if self._restored_level is not None else ("assumed_off" if self._client.dump_complete else None))}
 
     async def async_added_to_hass(self) -> None:
         # After a Home Assistant restart the processor does not repeat its state dump, so start from the last known state;

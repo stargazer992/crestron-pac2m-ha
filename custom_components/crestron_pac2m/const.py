@@ -14,6 +14,7 @@ LISTEN_PORT = 41794                     # we listen here for the processor's hel
 SOURCE_PORT = 49638                     # source port Control4 used for commands; falls back to a random port if busy
 
 # ---- session timing (seconds) ----
+DUMP_SETTLE_SECONDS = 8                 # after a hello, joins with no reported level are taken as off (the dump leaves out lights at 0)
 KEEPALIVE_SECONDS = 30                  # Control4 sends ping + join 4000 high this often; the processor needs it
 RETRY_SECONDS = 15                      # while the link is down, retry the keep-alive this often
 SESSION_TIMEOUT_SECONDS = 90            # no frame (data or ack) for this long = unavailable
