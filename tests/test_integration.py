@@ -179,11 +179,14 @@ async def test_label_check_flags_wrong_mapping(hass, processor):
         await async_go_standalone(hass, entry, False)
         await asyncio.sleep(1.0)
         report = entry.runtime_data.label_report
-        assert report is not None and [m[0] for m in report.mismatched] == [0x124]
-        assert report.mismatched[0][2:] == ("Downlights", "WRONG NAME")
+        assert report is not None and [m[0] for m in report.mismatched] == [0x124, 0x127]
+        assert report.mismatched[0][2:] == ("Downlights in Theater", "WRONG NAME in Theater")   # wrong light label
+        assert report.mismatched[1][2:] == ("Sconces 2 in Theater", "Sconces 2 in Kitchen")       # wrong room
         texts = [c.args[1] for c in notify.call_args_list if "MISMATCH" in str(c.args)]
         assert texts and "0x0124" in texts[0] and "WRONG NAME" in texts[0]
-    assert hass.states.get("binary_sensor.crestron_pac2m_link").attributes["label_mismatches"] == 1
+        await asyncio.sleep(2.0)                           # regression: it used to re-run endlessly (a notification every few seconds)
+        assert len([c for c in notify.call_args_list if "MISMATCH" in str(c.args)]) == 1
+    assert hass.states.get("binary_sensor.crestron_pac2m_link").attributes["label_mismatches"] == 2
 
 
 def test_label_compare_unit():
@@ -198,6 +201,6 @@ def test_room_entries_do_not_overwrite_light_labels():
     """Real processor: every light name (odd id) is followed by a room name (even id) with the same join number."""
     from custom_components.crestron_pac2m import protocol
     light = protocol.decode_payload(bytes([len(b"Downlights") + 3, 0x12, 0x47]) + b"Downlights")
-    room = protocol.decode_payload(bytes([len(b"Theater") + 3, 0x12, 0x48]) + b"Theater")
+    room = protocol.decode_payload(bytes([len(b"Theater") + 3, 0x12, 0x46]) + b"Theater")
     assert (light.kind, light.join, light.text) == ("name", 0x124, "Downlights")
-    assert (room.kind, room.join, room.text) == ("room", 0x124, "Theater")
+    assert (room.kind, room.name_id, room.text) == ("room", 0x46, "Theater")

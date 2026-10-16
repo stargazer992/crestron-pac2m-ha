@@ -45,6 +45,7 @@ DISABLE_DELAY_SECONDS = 5               # after "return to Control4", disable th
 # ---- label verification ----
 LABEL_CHECK_DELAY_SECONDS = 8           # after the link comes up, wait for the name dump, then compare the labels
 LABEL_NOTIFICATION_ID = "crestron_pac2m_labels"
+SIGNAL_LABELS_UPDATED = "crestron_pac2m_labels_updated"   # dispatcher signal: refresh the Link sensor attributes
 
 # ---- notifications ----
 NOTIFY_SERVICE = "mobile_app_iphone_rg"  # notify.<this> gets a message in addition to the persistent notification

@@ -4,10 +4,11 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import CrestronConfigEntry
-from .const import CONF_MODE, DEFAULT_MODE, DOMAIN
+from .const import CONF_MODE, DEFAULT_MODE, DOMAIN, SIGNAL_LABELS_UPDATED
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
@@ -46,6 +47,7 @@ class CrestronLink(BinarySensorEntity):
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(self._client.add_link_listener(self._changed))
+        self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_LABELS_UPDATED, self._changed))
 
     @callback
     def _changed(self) -> None:

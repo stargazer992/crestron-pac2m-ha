@@ -38,6 +38,7 @@ class FakeProcessor:
         self.keepalive_seen = False
         self.levels = {0x127: 0x0000, 0x124: 0xFFFF}
         self.names = {0x124: "WRONG NAME", 0x127: "Sconces 2"}   # join -> label sent in the dump
+        self.rooms = {0x124: "Theater", 0x127: "Kitchen"}   # join -> room sent in the dump (0x127 is deliberately wrong)
         self.seq = 0
         self.client_addr = ("127.0.0.1", PORTS["listen"])
         self._servers = []
@@ -120,8 +121,8 @@ class FakeProcessor:
         for join, text in self.names.items():
             t = text.encode()
             self.send_data(bytes([len(t) + 3, 0x12, 2 * (join - 0x100) - 1]) + t)
-            r = b"Theater"                                   # the room entry (even id) that follows each light name
-            self.send_data(bytes([len(r) + 3, 0x12, 2 * (join - 0x100)]) + r)
+            r = self.rooms.get(join, "Theater").encode()      # room entry: even id = the light's id - 1
+            self.send_data(bytes([len(r) + 3, 0x12, 2 * (join - 0x100) - 2]) + r)
         for join, level in self.levels.items():
             self.send_data(protocol.analog_payload(join, level))
 

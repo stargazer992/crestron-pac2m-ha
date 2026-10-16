@@ -35,14 +35,23 @@ def _norm(text: str) -> str:
     return " ".join(text.replace("_", " ").casefold().split())
 
 
-def compare(lights, labels: dict[int, str]) -> LabelReport:
-    """lights = const.LIGHTS rows (join, entity_id, kind, room, label); labels = join -> label from the processor."""
+def compare(lights, labels: dict[int, str], room_for_join=lambda join: None) -> LabelReport:
+    """lights = const.LIGHTS rows (join, entity_id, kind, room, label).
+
+    labels = join -> light label from the processor; room_for_join(join) -> room name from the processor (or None).
+    Both the light label and the room must match; the room check confirms the whole join -> room grouping.
+    """
     report = LabelReport()
-    for join, entity_id, _kind, _room, expected in lights:
+    for join, entity_id, _kind, room, expected in lights:
         report.checked += 1
         actual = labels.get(join)
+        actual_room = room_for_join(join)
         if actual is None:
             report.missing.append((join, entity_id, expected))
-        elif _norm(actual) != _norm(expected):
-            report.mismatched.append((join, entity_id, expected, actual))
+            continue
+        label_ok = _norm(actual) == _norm(expected)
+        room_ok = actual_room is None or _norm(actual_room) == _norm(room)
+        if not (label_ok and room_ok):
+            shown = actual if actual_room is None else f"{actual} in {actual_room}"
+            report.mismatched.append((join, entity_id, f"{expected} in {room}", shown))
     return report

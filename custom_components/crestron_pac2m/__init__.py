@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.components import persistent_notification
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -34,6 +35,7 @@ from .const import (
     LABEL_CHECK_DELAY_SECONDS,
     LABEL_NOTIFICATION_ID,
     LIGHTS,
+    SIGNAL_LABELS_UPDATED,
     LISTEN_PORT,
     MODE_STANDALONE,
     SOURCE_PORT,
@@ -53,6 +55,7 @@ class CrestronData:
 
     client: CrestronClient
     label_report: LabelReport | None = None          # result of the last label comparison
+    label_summary_sent: str = ""                      # last text sent as a notification (no repeats)
 
 
 type CrestronConfigEntry = ConfigEntry[CrestronData]
@@ -120,30 +123,40 @@ def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: Cr
     """After every link-up, compare the processor's labels with the mapping table and report differences."""
     client = data.client
     timer: dict[str, CALLBACK_TYPE | None] = {"cancel": None}
+    state = {"was_connected": False}
 
     async def _run(_now) -> None:
         timer["cancel"] = None
         try:
-            report = compare(LIGHTS, client.labels)
+            report = compare(LIGHTS, client.labels, client.room_for_join)
             data.label_report = report
+            summary = report.summary()
             if report.mismatched:
-                _LOGGER.warning("Crestron label check:\n%s", report.summary())
-                await async_notify(hass, "Crestron: label mismatch", report.summary(),
-                                   f"{len(report.mismatched)} Crestron light(s) may be mapped wrongly - see Home Assistant", LABEL_NOTIFICATION_ID)
+                if summary != data.label_summary_sent:          # tell once per distinct result, never repeat
+                    data.label_summary_sent = summary
+                    _LOGGER.warning("Crestron label check:\n%s", summary)
+                    await async_notify(hass, "Crestron: label mismatch", summary,
+                                       f"{len(report.mismatched)} Crestron light(s) may be mapped wrongly - see Home Assistant", LABEL_NOTIFICATION_ID)
             else:
-                _LOGGER.info("Crestron label check: %s", report.summary().splitlines()[0])
+                _LOGGER.info("Crestron label check: %s", summary.splitlines()[0])
+                data.label_summary_sent = ""
                 persistent_notification.async_dismiss(hass, LABEL_NOTIFICATION_ID)
-            client.notify_link()                      # refresh the link sensor attributes
+            async_dispatcher_send(hass, SIGNAL_LABELS_UPDATED)   # refresh the Link sensor (NOT the link listeners: that looped)
         except Exception:  # noqa: BLE001 - a failed check must never affect the lights
             _LOGGER.exception("Crestron label check failed")
 
     @callback
     def _link_changed() -> None:
-        if timer["cancel"] is not None:
+        """Run the check once per link-up (False -> True transition only)."""
+        connected = client.connected
+        if connected and not state["was_connected"]:
+            if timer["cancel"] is not None:
+                timer["cancel"]()
+            timer["cancel"] = async_call_later(hass, LABEL_CHECK_DELAY_SECONDS, _run)
+        elif not connected and timer["cancel"] is not None:
             timer["cancel"]()
             timer["cancel"] = None
-        if client.connected:
-            timer["cancel"] = async_call_later(hass, LABEL_CHECK_DELAY_SECONDS, _run)
+        state["was_connected"] = connected
 
     @callback
     def _cancel() -> None:

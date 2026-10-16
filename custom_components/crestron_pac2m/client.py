@@ -69,7 +69,8 @@ class CrestronClient:
         self.listen_port = listen_port
         self.source_port = source_port
         self.levels: dict[int, int] = {}           # analog join -> 16-bit level
-        self.labels: dict[int, str] = {}           # analog join -> Crestron label (from the name dump)
+        self.labels: dict[int, str] = {}           # analog join -> Crestron light label (from the name dump)
+        self.room_names: dict[int, str] = {}       # name id (even) -> room name; the room of a light is the entry at (its id - 1)
         self.connected = False
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
         self.frames_rx = 0
@@ -81,6 +82,10 @@ class CrestronClient:
         self._send_lock = asyncio.Lock()
         self._link_listeners: set[LinkCallback] = set()
         self._join_listeners: dict[int, set[JoinCallback]] = {}
+
+    def room_for_join(self, join: int) -> str | None:
+        """Room name the processor reports for a light: the even-id entry just before the light's own (odd) id."""
+        return self.room_names.get(2 * (join - protocol.JOIN_BASE) - 2)
 
     # ---------- listeners ----------
     def add_link_listener(self, callback: LinkCallback) -> Callable[[], None]:
@@ -220,6 +225,8 @@ class CrestronClient:
                 self.levels[event.join] = event.level
         elif event.kind == "name":
             self.labels[event.join] = event.text
+        elif event.kind == "room":
+            self.room_names[event.name_id] = event.text
         elif event.kind == "hello":
             _LOGGER.info("Crestron hello received, session established")
 
