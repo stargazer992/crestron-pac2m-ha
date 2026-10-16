@@ -1,0 +1,25 @@
+# Services of the Crestron PAC2M integration. All of them are a dry run unless dry_run is set to false.
+go_standalone:
+  fields:
+    dry_run:
+      default: true
+      selector:
+        boolean:
+adopt_entity_ids:
+  fields:
+    dry_run:
+      default: true
+      selector:
+        boolean:
+return_to_control4:
+  fields:
+    dry_run:
+      default: true
+      selector:
+        boolean:
+release_entity_ids:
+  fields:
+    dry_run:
+      default: true
+      selector:
+        boolean:
