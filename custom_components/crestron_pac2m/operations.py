@@ -35,15 +35,18 @@ def find_control4_host(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
     return entry.options.get(CONF_CONTROL4_HOST) or None
 
 
-async def _notify(hass: HomeAssistant, title: str, result: SwitchResult) -> None:
+async def async_notify(hass: HomeAssistant, title: str, text: str, short: str, notification_id: str = NOTIFICATION_ID) -> None:
     """Persistent notification plus the phone (project rule). Never raises."""
-    text = result.message + "\n\n" + "\n".join(result.steps)
     try:
-        persistent_notification.async_create(hass, text, title=title, notification_id=NOTIFICATION_ID)
+        persistent_notification.async_create(hass, text, title=title, notification_id=notification_id)
         if hass.services.has_service("notify", NOTIFY_SERVICE):
-            await hass.services.async_call("notify", NOTIFY_SERVICE, {"title": title, "message": result.message})
+            await hass.services.async_call("notify", NOTIFY_SERVICE, {"title": title, "message": short})
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Could not send the notification")
+
+
+async def _notify(hass: HomeAssistant, title: str, result: SwitchResult) -> None:
+    await async_notify(hass, title, result.message + "\n\n" + "\n".join(result.steps), result.message)
 
 
 def _persist_mode(hass: HomeAssistant, entry: ConfigEntry, mode: str) -> None:

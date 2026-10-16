@@ -5,6 +5,7 @@ so the Control4 server is no longer needed for lighting. Built for the Fleur de 
 but the protocol notes and tools apply to any PAC2M.
 
 * Reuses the **existing Home Assistant light entity ids** (dashboards, scenes and automations keep working).
+* Checks at every connect that the processor's labels match the mapping table, and warns if a join looks mapped to the wrong light.
 * Lights are **available** whenever the processor session is alive - independent of the Control4 server.
 * One setting switches between two modes - and back - without touching a console by hand.
 
@@ -53,7 +54,8 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | IP table edits + reboot + Control4 reconnect | Verified (rollback test, Oct 2026) |
 | All other joins (33 lights) | Derived from the Control4 project; spot-check after cutover |
 | Family Room fan (0x106) | Never responded under Control4 either |
-| Integration inside Home Assistant 2026.10 | 7 automated tests against a simulated processor + console (`tests/`) |
+| Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`) |
+| Integration inside Home Assistant 2026.10 | 9 automated tests against a simulated processor + console (`tests/`) |
 | Integration against the real processor | **Not yet run** - first real run is the cutover |
 | `device_id` for the new IP table entry | Left to the default (the Control4 entry also has none) |
 

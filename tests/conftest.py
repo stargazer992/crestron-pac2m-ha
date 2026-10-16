@@ -37,6 +37,7 @@ class FakeProcessor:
         self.udp_frames = 0
         self.keepalive_seen = False
         self.levels = {0x127: 0x0000, 0x124: 0xFFFF}
+        self.names = {0x124: "WRONG NAME", 0x127: "Sconces 2"}   # join -> label sent in the dump
         self.seq = 0
         self.client_addr = ("127.0.0.1", PORTS["listen"])
         self._servers = []
@@ -116,6 +117,9 @@ class FakeProcessor:
         self.udp.sendto(pkt, self.client_addr)
 
     def dump(self):
+        for join, text in self.names.items():
+            t = text.encode()
+            self.send_data(bytes([len(t) + 3, 0x12, 2 * (join - 0x100) - 1]) + t)
         for join, level in self.levels.items():
             self.send_data(protocol.analog_payload(join, level))
 
@@ -180,6 +184,7 @@ async def processor(monkeypatch):
     monkeypatch.setattr(client, "SESSION_TIMEOUT_SECONDS", 5)
     monkeypatch.setattr(client, "COMMAND_SPACING_SECONDS", 0)
     monkeypatch.setattr(operations, "DISABLE_DELAY_SECONDS", 0.2)
+    monkeypatch.setattr(pkg, "LABEL_CHECK_DELAY_SECONDS", 0.3)
     proc = FakeProcessor()
     await proc.start()
     yield proc

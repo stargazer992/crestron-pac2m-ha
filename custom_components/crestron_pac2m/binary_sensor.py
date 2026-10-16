@@ -34,11 +34,14 @@ class CrestronLink(BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        report = self._entry.runtime_data.label_report
         return {
             "mode": self._entry.options.get(CONF_MODE, DEFAULT_MODE),
             "frames_received": self._client.frames_rx,
             "frames_sent": self._client.frames_tx,
             "labels_known": len(self._client.labels),
+            "label_mismatches": None if report is None else len(report.mismatched),
+            "labels_missing": None if report is None else len(report.missing),
         }
 
     async def async_added_to_hass(self) -> None:

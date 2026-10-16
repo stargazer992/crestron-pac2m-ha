@@ -42,6 +42,10 @@ POLL_SECONDS = 10                       # how often to re-check while waiting
 AUTO_FAILBACK = True                    # standalone switch that never comes up is undone (back to the previous IP)
 DISABLE_DELAY_SECONDS = 5               # after "return to Control4", disable the integration this many seconds later
 
+# ---- label verification ----
+LABEL_CHECK_DELAY_SECONDS = 8           # after the link comes up, wait for the name dump, then compare the labels
+LABEL_NOTIFICATION_ID = "crestron_pac2m_labels"
+
 # ---- notifications ----
 NOTIFY_SERVICE = "mobile_app_iphone_rg"  # notify.<this> gets a message in addition to the persistent notification
 NOTIFICATION_ID = "crestron_pac2m_switch"

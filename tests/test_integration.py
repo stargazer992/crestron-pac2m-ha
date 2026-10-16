@@ -169,3 +169,26 @@ async def test_config_flow_creates_passive_entry(hass, processor):
     await hass.async_block_till_done()
     await asyncio.sleep(0.8)
     assert processor.udp_frames == 0
+
+
+async def test_label_check_flags_wrong_mapping(hass, processor):
+    """The processor says join 0x124 is 'WRONG NAME' (table expects 'Downlights'); 0x127 'Sconces 2' matches."""
+    entry, _ = await setup_entry(hass)
+    with patch("custom_components.crestron_pac2m.operations.persistent_notification.async_create") as notify, \
+         patch("custom_components.crestron_pac2m.operations.persistent_notification.async_dismiss"):
+        await async_go_standalone(hass, entry, False)
+        await asyncio.sleep(1.0)
+        report = entry.runtime_data.label_report
+        assert report is not None and [m[0] for m in report.mismatched] == [0x124]
+        assert report.mismatched[0][2:] == ("Downlights", "WRONG NAME")
+        texts = [c.args[1] for c in notify.call_args_list if "MISMATCH" in str(c.args)]
+        assert texts and "0x0124" in texts[0] and "WRONG NAME" in texts[0]
+    assert hass.states.get("binary_sensor.crestron_pac2m_link").attributes["label_mismatches"] == 1
+
+
+def test_label_compare_unit():
+    from custom_components.crestron_pac2m.labelcheck import compare
+    lights = ((0x101, "light.a", "Dimmer", "R", "Garage & Portico Flood"), (0x102, "light.b", "Dimmer", "R", "Back_Porch"), (0x103, "light.c", "Dimmer", "R", "Rope"))
+    report = compare(lights, {0x101: "garage  & portico flood", 0x102: "Back Porch"})
+    assert report.ok and report.missing == [(0x103, "light.c", "Rope")] and report.checked == 3
+    assert not compare(lights, {0x101: "Other"}).ok

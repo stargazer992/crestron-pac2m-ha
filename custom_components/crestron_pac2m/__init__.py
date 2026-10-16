@@ -16,7 +16,9 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.components import persistent_notification
+from homeassistant.helpers.event import async_call_later
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
@@ -29,11 +31,15 @@ from .const import (
     CRESTRON_PORT,
     DEFAULT_MODE,
     DOMAIN,
+    LABEL_CHECK_DELAY_SECONDS,
+    LABEL_NOTIFICATION_ID,
+    LIGHTS,
     LISTEN_PORT,
     MODE_STANDALONE,
     SOURCE_PORT,
 )
-from .operations import async_go_standalone, async_return_to_control4
+from .labelcheck import LabelReport, compare
+from .operations import async_go_standalone, async_notify, async_return_to_control4
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.LIGHT, Platform.BINARY_SENSOR]
@@ -46,6 +52,7 @@ class CrestronData:
     """Runtime data of one config entry."""
 
     client: CrestronClient
+    label_report: LabelReport | None = None          # result of the last label comparison
 
 
 type CrestronConfigEntry = ConfigEntry[CrestronData]
@@ -97,7 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
         await client.async_start()
     except OSError as err:
         raise ConfigEntryNotReady(f"Cannot open UDP port for the Crestron feedback: {err}") from err
-    entry.runtime_data = CrestronData(client)
+    data = CrestronData(client)
+    entry.runtime_data = data
+    _setup_label_check(hass, entry, data)
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
@@ -105,6 +114,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
         raise
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     return True
+
+
+def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: CrestronData) -> None:
+    """After every link-up, compare the processor's labels with the mapping table and report differences."""
+    client = data.client
+    timer: dict[str, CALLBACK_TYPE | None] = {"cancel": None}
+
+    async def _run(_now) -> None:
+        timer["cancel"] = None
+        try:
+            report = compare(LIGHTS, client.labels)
+            data.label_report = report
+            if report.mismatched:
+                _LOGGER.warning("Crestron label check:\n%s", report.summary())
+                await async_notify(hass, "Crestron: label mismatch", report.summary(),
+                                   f"{len(report.mismatched)} Crestron light(s) may be mapped wrongly - see Home Assistant", LABEL_NOTIFICATION_ID)
+            else:
+                _LOGGER.info("Crestron label check: %s", report.summary().splitlines()[0])
+                persistent_notification.async_dismiss(hass, LABEL_NOTIFICATION_ID)
+            client.notify_link()                      # refresh the link sensor attributes
+        except Exception:  # noqa: BLE001 - a failed check must never affect the lights
+            _LOGGER.exception("Crestron label check failed")
+
+    @callback
+    def _link_changed() -> None:
+        if timer["cancel"] is not None:
+            timer["cancel"]()
+            timer["cancel"] = None
+        if client.connected:
+            timer["cancel"] = async_call_later(hass, LABEL_CHECK_DELAY_SECONDS, _run)
+
+    @callback
+    def _cancel() -> None:
+        if timer["cancel"] is not None:
+            timer["cancel"]()
+            timer["cancel"] = None
+
+    entry.async_on_unload(client.add_link_listener(_link_changed))
+    entry.async_on_unload(_cancel)
 
 
 async def _options_updated(hass: HomeAssistant, entry: CrestronConfigEntry) -> None:

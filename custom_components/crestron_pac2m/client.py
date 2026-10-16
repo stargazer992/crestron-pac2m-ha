@@ -93,7 +93,7 @@ class CrestronClient:
         self._join_listeners.setdefault(join, set()).add(callback)
         return lambda: self._join_listeners.get(join, set()).discard(callback)
 
-    def _notify_link(self) -> None:
+    def notify_link(self) -> None:
         for callback in list(self._link_listeners):
             try:
                 callback()
@@ -228,7 +228,7 @@ class CrestronClient:
             return
         self.connected = value
         _LOGGER.info("Crestron link is %s", "UP" if value else "DOWN")
-        self._notify_link()
+        self.notify_link()
         if value:
             # entities that were unavailable must refresh with the (possibly already known) levels
             for join in list(self.levels):
