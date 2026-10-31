@@ -16,9 +16,11 @@ from .const import (
     CONF_HA_HOST,
     CONF_HOST,
     CONF_MODE,
+    CONF_NOTIFY_SERVICE,
     DEFAULT_HOST,
     DEFAULT_MODE,
     DOMAIN,
+    NOTIFY_SERVICE,
 )
 from .operations import async_go_standalone, async_return_to_control4, find_control4_host
 
@@ -99,15 +101,26 @@ class CrestronOptionsFlow(OptionsFlow):
         return self.async_abort(reason="result", description_placeholders={"result": text})
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(title="", data={**self.config_entry.options, **{k: v.strip() for k, v in user_input.items()}})
+        errors: dict[str, str] = {}
         options = self.config_entry.options
+        current = {
+            CONF_CONTROL4_HOST: options.get(CONF_CONTROL4_HOST, ""),
+            CONF_HA_HOST: options.get(CONF_HA_HOST, ""),
+            CONF_NOTIFY_SERVICE: options.get(CONF_NOTIFY_SERVICE, NOTIFY_SERVICE),
+        }
+        if user_input is not None:
+            # a cleared field is left out of user_input, so every key is rebuilt (missing = empty)
+            current = {key: str(user_input.get(key, "")).strip() for key in current}
+            current[CONF_NOTIFY_SERVICE] = current[CONF_NOTIFY_SERVICE].removeprefix("notify.")
+            for key in (CONF_CONTROL4_HOST, CONF_HA_HOST):
+                if current[key] and not _valid_ip(current[key]):
+                    errors[key] = "invalid_host"
+            if not errors:
+                return self.async_create_entry(title="", data={**options, **current})
         return self.async_show_form(
             step_id="settings",
             data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_CONTROL4_HOST, default=options.get(CONF_CONTROL4_HOST, "")): str,
-                    vol.Optional(CONF_HA_HOST, default=options.get(CONF_HA_HOST, "")): str,
-                }
+                {vol.Optional(key, description={"suggested_value": value}): str for key, value in current.items()}
             ),
+            errors=errors,
         )

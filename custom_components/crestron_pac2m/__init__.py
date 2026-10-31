@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.components import persistent_notification
+from homeassistant.components.network import async_get_source_ip
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
@@ -25,8 +26,13 @@ from homeassistant.helpers import config_validation as cv
 
 from .adopt import async_adopt, async_release
 from .client import CrestronClient
+from .console import CrestronConsole
 from .const import (
+    ADDRESS_CHECK_DELAY_SECONDS,
+    ADDRESS_NOTIFICATION_ID,
     ADOPT_DRY_RUN_DEFAULT,
+    CIP_ID,
+    CONF_HA_HOST,
     CONF_HOST,
     EVENT_DIGITAL,
     CONF_MODE,
@@ -35,6 +41,10 @@ from .const import (
     DOMAIN,
     LABEL_CHECK_DELAY_SECONDS,
     LABEL_NOTIFICATION_ID,
+    LABEL_STATUS_MISMATCH,
+    LABEL_STATUS_NO_DUMP,
+    LABEL_STATUS_OK,
+    LABEL_STATUS_PENDING,
     LIGHTS,
     SIGNAL_LABELS_UPDATED,
     LISTEN_PORT,
@@ -57,6 +67,9 @@ class CrestronData:
     client: CrestronClient
     label_report: LabelReport | None = None          # result of the last label comparison
     label_summary_sent: str = ""                      # last text sent as a notification (no repeats)
+    label_status: str = LABEL_STATUS_PENDING          # Link sensor attribute label_check
+    address_summary_sent: str = ""                    # last address warning sent (no repeats)
+    switching: bool = False                           # a go stand-alone / return to Control4 is using the console
 
 
 type CrestronConfigEntry = ConfigEntry[CrestronData]
@@ -111,6 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
     data = CrestronData(client)
     entry.runtime_data = data
     _setup_label_check(hass, entry, data)
+    _setup_address_check(hass, entry, data)
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
@@ -137,14 +151,22 @@ def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: Cr
     async def _run(_now) -> None:
         timer["cancel"] = None
         try:
+            if not client.labels:
+                # no name dump since the processor's last reboot (normal after a Home Assistant restart): nothing to compare
+                data.label_report = None
+                data.label_status = LABEL_STATUS_NO_DUMP
+                _LOGGER.info("Crestron label check skipped: no name dump received (the processor sends one only to a new session)")
+                async_dispatcher_send(hass, SIGNAL_LABELS_UPDATED)
+                return
             report = compare(LIGHTS, client.labels, client.room_for_join)
             data.label_report = report
+            data.label_status = LABEL_STATUS_MISMATCH if report.mismatched else LABEL_STATUS_OK
             summary = report.summary()
             if report.mismatched:
                 if summary != data.label_summary_sent:          # tell once per distinct result, never repeat
                     data.label_summary_sent = summary
                     _LOGGER.warning("Crestron label check:\n%s", summary)
-                    await async_notify(hass, "Crestron: label mismatch", summary,
+                    await async_notify(hass, entry, "Crestron: label mismatch", summary,
                                        f"{len(report.mismatched)} Crestron light(s) may be mapped wrongly - see Home Assistant", LABEL_NOTIFICATION_ID)
             else:
                 _LOGGER.info("Crestron label check: %s", summary.splitlines()[0])
@@ -174,6 +196,62 @@ def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: Cr
             timer["cancel"] = None
 
     entry.async_on_unload(client.add_link_listener(_link_changed))
+    entry.async_on_unload(_cancel)
+
+
+def _setup_address_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: CrestronData) -> None:
+    """Stand-alone but the link stays down: read the IP table (read only) and warn if it points at an old HA address."""
+    client = data.client
+    timer: dict[str, CALLBACK_TYPE | None] = {"cancel": None}
+
+    async def _run(_now) -> None:
+        timer["cancel"] = None
+        if client.connected or not client.active or data.switching:
+            return
+        try:
+            ha_ip = entry.options.get(CONF_HA_HOST) or await async_get_source_ip(hass, target_ip=client.host)
+            con = CrestronConsole(client.host)
+            try:
+                await con.async_connect()
+                row = await con.async_read_entry()
+            finally:
+                await con.async_close()
+        except Exception as err:  # noqa: BLE001 - the check is advisory; never affect the lights
+            _LOGGER.debug("Crestron address check could not read the IP table: %s", err)
+            return
+        if row is None or row.ip == ha_ip:
+            if data.address_summary_sent:
+                data.address_summary_sent = ""
+                persistent_notification.async_dismiss(hass, ADDRESS_NOTIFICATION_ID)
+            return
+        summary = (
+            f"The processor's IP table (entry {CIP_ID}) points at {row.ip}, but Home Assistant is now {ha_ip}, "
+            "so the Crestron lights stay unavailable. Fix: Configure > Go stand-alone (re-points the processor and "
+            "reboots it, about 2-4 minutes). A DHCP reservation for Home Assistant prevents this."
+        )
+        if summary != data.address_summary_sent:
+            data.address_summary_sent = summary
+            _LOGGER.warning("Crestron address check: %s", summary)
+            await async_notify(hass, entry, "Crestron: processor points at another address", summary,
+                               f"Crestron points at {row.ip}, Home Assistant is {ha_ip} - see Home Assistant", ADDRESS_NOTIFICATION_ID)
+
+    @callback
+    def _schedule() -> None:
+        if client.connected:
+            if timer["cancel"] is not None:
+                timer["cancel"]()
+                timer["cancel"] = None
+        elif timer["cancel"] is None:
+            timer["cancel"] = async_call_later(hass, ADDRESS_CHECK_DELAY_SECONDS, _run)
+
+    @callback
+    def _cancel() -> None:
+        if timer["cancel"] is not None:
+            timer["cancel"]()
+            timer["cancel"] = None
+
+    _schedule()
+    entry.async_on_unload(client.add_link_listener(_schedule))
     entry.async_on_unload(_cancel)
 
 

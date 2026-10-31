@@ -36,6 +36,7 @@ class FakeProcessor:
         self.commands = []                 # console commands received
         self.udp_frames = 0
         self.keepalive_seen = False
+        self.drop_analog = 0               # drop this many analog commands (no ack, not applied), like lost UDP packets
         self.resync_dumps = True          # False = like the real processor: no new dump while the session is alive
         self.levels = {0x127: 0x0000, 0x124: 0xFFFF}
         self.names = {0x124: "WRONG NAME", 0x127: "Sconces 2"}   # join -> label sent in the dump
@@ -113,9 +114,12 @@ class FakeProcessor:
             self.send_data(bytes([2, 3, 0]))   # the processor initiates the hello toward the new peer
 
     # ---------- UDP ----------
-    def send_data(self, payload):
-        pkt = protocol.build_data(self.seq, payload)
-        self.seq = (self.seq + 1) & 0xFF
+    def send_data(self, payload, seq=None):
+        """Send a data frame; seq=<an earlier seq> repeats it like a retransmit."""
+        if seq is None:
+            seq = self.seq
+            self.seq = (self.seq + 1) & 0xFF
+        pkt = protocol.build_data(seq, payload)
         self.udp.sendto(pkt, self.client_addr)
 
     def dump(self):
@@ -137,8 +141,11 @@ class FakeProcessor:
             self.udp_frames += 1
             if frame.kind != "data":
                 continue
-            self.udp.sendto(protocol.build_ack(frame.seq), addr)
             ev = protocol.decode_payload(frame.payload)
+            if ev.kind == "analog" and self.drop_analog:
+                self.drop_analog -= 1
+                continue
+            self.udp.sendto(protocol.build_ack(frame.seq), addr)
             if ev.kind == "digital" and ev.join == 4000 and ev.level == 1 and not self.keepalive_seen:
                 self.keepalive_seen = True
                 self.online = True
@@ -189,9 +196,11 @@ async def processor(monkeypatch):
     monkeypatch.setattr(client, "RETRY_SECONDS", 0.2)
     monkeypatch.setattr(client, "SESSION_TIMEOUT_SECONDS", 5)
     monkeypatch.setattr(client, "COMMAND_SPACING_SECONDS", 0)
+    monkeypatch.setattr(client, "COMMAND_ACK_TIMEOUT_SECONDS", 0.2)
     monkeypatch.setattr(client, "LOOP_TICK_SECONDS", 0.05)
     monkeypatch.setattr(operations, "DISABLE_DELAY_SECONDS", 0.2)
     monkeypatch.setattr(pkg, "LABEL_CHECK_DELAY_SECONDS", 0.3)
+    monkeypatch.setattr(pkg, "ADDRESS_CHECK_DELAY_SECONDS", 0.5)
     proc = FakeProcessor()
     await proc.start()
     yield proc

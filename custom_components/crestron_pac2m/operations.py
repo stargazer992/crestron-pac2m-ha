@@ -14,6 +14,7 @@ from .const import (
     CONF_HA_HOST,
     CONF_HOST,
     CONF_MODE,
+    CONF_NOTIFY_SERVICE,
     CONTROL4_DOMAIN,
     DISABLE_DELAY_SECONDS,
     MODE_CONTROL4,
@@ -35,18 +36,36 @@ def find_control4_host(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
     return entry.options.get(CONF_CONTROL4_HOST) or None
 
 
-async def async_notify(hass: HomeAssistant, title: str, text: str, short: str, notification_id: str = NOTIFICATION_ID) -> None:
+def notify_service_for(entry: ConfigEntry) -> str:
+    """The phone notify service from the options ("notify." prefix optional); empty = persistent notification only."""
+    service = str(entry.options.get(CONF_NOTIFY_SERVICE, NOTIFY_SERVICE)).strip()
+    return service.removeprefix("notify.")
+
+
+async def async_notify(
+    hass: HomeAssistant, entry: ConfigEntry, title: str, text: str, short: str, notification_id: str = NOTIFICATION_ID
+) -> None:
     """Persistent notification plus the phone (project rule). Never raises."""
     try:
         persistent_notification.async_create(hass, text, title=title, notification_id=notification_id)
-        if hass.services.has_service("notify", NOTIFY_SERVICE):
-            await hass.services.async_call("notify", NOTIFY_SERVICE, {"title": title, "message": short})
+        service = notify_service_for(entry)
+        if service and hass.services.has_service("notify", service):
+            await hass.services.async_call("notify", service, {"title": title, "message": short})
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Could not send the notification")
 
 
-async def _notify(hass: HomeAssistant, title: str, result: SwitchResult) -> None:
-    await async_notify(hass, title, result.message + "\n\n" + "\n".join(result.steps), result.message)
+async def _notify(hass: HomeAssistant, entry: ConfigEntry, title: str, result: SwitchResult) -> None:
+    await async_notify(hass, entry, title, result.message + "\n\n" + "\n".join(result.steps), result.message)
+
+
+async def _repoint(entry: ConfigEntry, *args) -> SwitchResult:
+    """repoint() with the switching flag set, so the address check never opens the console at the same time."""
+    entry.runtime_data.switching = True
+    try:
+        return await repoint(*args)
+    finally:
+        entry.runtime_data.switching = False
 
 
 def _persist_mode(hass: HomeAssistant, entry: ConfigEntry, mode: str) -> None:
@@ -72,7 +91,7 @@ async def async_go_standalone(hass: HomeAssistant, entry: ConfigEntry, dry_run: 
 
     if not dry_run:
         client.active = True
-    result = await repoint(host, ha_ip, dry_run, ready, failback)
+    result = await _repoint(entry, host, ha_ip, dry_run, ready, failback)
     result.steps.insert(0, f"Home Assistant address used: {ha_ip}")
     if result.ok:
         messages, _ = await async_adopt(hass, dry_run)
@@ -83,7 +102,7 @@ async def async_go_standalone(hass: HomeAssistant, entry: ConfigEntry, dry_run: 
     elif not dry_run:
         client.active = False
     if not dry_run:
-        await _notify(hass, "Crestron: stand-alone", result)
+        await _notify(hass, entry, "Crestron: stand-alone", result)
     return result
 
 
@@ -98,7 +117,7 @@ async def async_return_to_control4(hass: HomeAssistant, entry: ConfigEntry, dry_
     async def failback() -> None:
         client.active = True
 
-    result = await repoint(host, c4_ip, dry_run, None, failback)
+    result = await _repoint(entry, host, c4_ip, dry_run, None, failback)
     result.steps.insert(0, f"Control4 address used: {c4_ip}")
     if result.ok:
         messages, needs_reload = await async_release(hass, dry_run)
@@ -117,5 +136,5 @@ async def async_return_to_control4(hass: HomeAssistant, entry: ConfigEntry, dry_
 
             hass.loop.call_later(DISABLE_DELAY_SECONDS, _disable)
     if not dry_run:
-        await _notify(hass, "Crestron: back to Control4", result)
+        await _notify(hass, entry, "Crestron: back to Control4", result)
     return result

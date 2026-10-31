@@ -24,7 +24,7 @@
         "menu_options": {
           "standalone": "Go stand-alone (processor points to Home Assistant)",
           "control4": "Return to Control4 (processor points to Control4, integration disables itself)",
-          "settings": "Address overrides"
+          "settings": "Settings (address overrides, phone notification)"
         }
       },
       "standalone": {
@@ -42,13 +42,17 @@
         }
       },
       "settings": {
-        "title": "Address overrides",
-        "description": "Only needed if the addresses cannot be found automatically. Leave empty for automatic.",
+        "title": "Settings",
+        "description": "The two addresses are only needed if they cannot be found automatically; leave them empty for automatic. The phone notification service gets a short message for every switch and warning (empty = persistent notification only).",
         "data": {
           "control4_host": "Control4 server IP",
-          "ha_host": "Home Assistant IP"
+          "ha_host": "Home Assistant IP",
+          "notify_service": "Phone notification service (notify.<name>)"
         }
       }
+    },
+    "error": {
+      "invalid_host": "Enter a valid IPv4 address"
     },
     "progress": {
       "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window."
