@@ -3,17 +3,26 @@
     "step": {
       "user": {
         "title": "Crestron PAC2M",
-        "description": "Adding the integration does NOT change the processor. It starts passive: it sends nothing and the lights stay unavailable until you choose 'Go stand-alone' under Configure.",
+        "description": "Found on the network: {found}.\n\nAdding the integration does NOT change the processor. It starts passive: it sends nothing and the lights stay unavailable until you choose 'Go stand-alone' under Configure.",
+        "data": {
+          "host": "Crestron processor IP address"
+        }
+      },
+      "reconfigure": {
+        "title": "Crestron processor address",
+        "description": "Current address: {current}. Found on the network: {found}.\n\nOnly changes the address Home Assistant uses to reach the processor (for example after it got a new IP). Nothing is sent to the processor and the mode stays the same.",
         "data": {
           "host": "Crestron processor IP address"
         }
       }
     },
     "error": {
-      "invalid_host": "Enter a valid IPv4 address"
+      "invalid_host": "Enter a valid IPv4 address",
+      "already_configured": "Another entry already uses this processor"
     },
     "abort": {
-      "already_configured": "This processor is already configured"
+      "already_configured": "This processor is already configured",
+      "reconfigure_successful": "The processor address is updated"
     }
   },
   "options": {

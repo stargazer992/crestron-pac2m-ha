@@ -186,3 +186,8 @@ Every digital join the processor sends (after the state dump has settled; the ke
 - If Home Assistant's IP changes (DHCP), the processor keeps sending to the old address and the link never comes up. In stand-alone mode, after `ADDRESS_CHECK_DELAY_SECONDS` (60 s) of link down, the console's `ipt` entry is read (never changed) and compared with HA's address; a mismatch raises notification `crestron_pac2m_address`. Fix with *Go stand-alone* (re-points and reboots) or a DHCP reservation.
 - After an HA restart there is no name dump (section 14), so the label check used to report 0 mismatches / 40 missing, which looked like a pass. It now skips the comparison and the Link sensor shows `label_check: no_dump` (other values: `pending`, `ok`, `mismatch`).
 - UNVERIFIED on the real processor: whether it ever retransmits frames, and how long it waits for an ack.
+
+## 18. Finding the processor, changing its address (v1.8.0)
+- Add Integration scans Home Assistant's local IPv4 networks (each capped at a /24) for a telnet console (port 23) whose prompt is a Crestron 2-series one (`PAC2M>`) and pre-fills the first one found. Read only: it opens the console, reads the banner and closes it. No UDP is sent, because a probe on 41794 while Control4 owns the processor is untested and adding the integration must never touch the lights side. The console accepts one session at a time, so the scan holds it for at most ~1.5 s.
+- Reconfigure (three dots on the integration) changes only `entry.data["host"]` and the unique id and reloads; the mode, options and entity ids stay. A renamed entry title is kept.
+- UNVERIFIED on the real network: the scan itself (only tested against the simulator).

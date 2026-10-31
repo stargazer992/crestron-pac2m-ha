@@ -1,8 +1,8 @@
 """Shared fixtures: custom integration loading + a simulated PAC2M (console + UDP) for end-to-end tests."""
 import asyncio
+import pathlib
 import re
 import sys
-import pathlib
 
 import pytest
 
@@ -181,13 +181,24 @@ class FakeProcessor:
 async def processor(monkeypatch):
     """A running fake processor with all module ports and timings pointed at it and shortened."""
     import custom_components.crestron_pac2m as pkg
-    from custom_components.crestron_pac2m import client, console, operations, switcher
+    from custom_components.crestron_pac2m import (
+        client,
+        console,
+        discovery,
+        operations,
+        switcher,
+    )
 
     monkeypatch.setattr(pkg, "CRESTRON_PORT", PORTS["crestron"])
     monkeypatch.setattr(pkg, "LISTEN_PORT", PORTS["listen"])
     monkeypatch.setattr(pkg, "SOURCE_PORT", PORTS["source"])
     monkeypatch.setattr(switcher, "CONSOLE_PORT", PORTS["console"])
     monkeypatch.setattr(console.CrestronConsole.__init__, "__defaults__", (PORTS["console"],))
+    monkeypatch.setattr(discovery, "CONSOLE_PORT", PORTS["console"])
+
+    async def _loopback_only(hass):
+        return ["127.0.0.1"]
+    monkeypatch.setattr(discovery, "async_candidate_hosts", _loopback_only)     # never scan the real network in tests
     monkeypatch.setattr(switcher, "REBOOT_SETTLE_SECONDS", 0.1)
     monkeypatch.setattr(switcher, "CONSOLE_BACK_SECONDS", 5)
     monkeypatch.setattr(switcher, "WAIT_READY_SECONDS", 3)

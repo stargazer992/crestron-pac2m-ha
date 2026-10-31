@@ -19,7 +19,9 @@ but the protocol notes and tools apply to any PAC2M.
 ## Install
 1. Copy `custom_components/crestron_pac2m` into `/config/custom_components/` (or add this repo to HACS as a custom repository).
 2. Restart Home Assistant.
-3. Settings > Devices & Services > Add Integration > **Crestron PAC2M Lighting** > enter the processor IP (default `192.168.104.111`).
+3. Settings > Devices & Services > Add Integration > **Crestron PAC2M Lighting**. It scans Home Assistant's local network (each network capped at a /24) for a telnet console with a Crestron 2-series prompt (`PAC2M>`) and pre-fills the address it finds (otherwise `192.168.104.111`); type another one if needed. The scan only reads the console banner and sends nothing over UDP.
+
+To change the processor address later (for example after it got a new IP): the integration's menu (three dots) > **Reconfigure**. This only changes where Home Assistant sends to; nothing is sent to the processor and the mode stays the same.
 
 Adding the integration **never changes the processor**. It starts in `control4` mode: passive, nothing sent, 40 lights shown as unavailable.
 

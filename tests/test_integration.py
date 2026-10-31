@@ -353,3 +353,59 @@ async def test_settings_validate_and_clear(hass, processor):
     assert flow["type"].value == "create_entry"
     assert entry.options[CONF_HA_HOST] == "10.1.1.120" and entry.options["control4_host"] == ""
     assert entry.options["notify_service"] == "my_phone" and entry.options[CONF_MODE] == MODE_CONTROL4
+
+
+async def test_config_flow_finds_the_processor(hass, processor):
+    """The scan pre-fills the processor's address and never sends anything to it."""
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert flow["type"].value == "form" and flow["description_placeholders"]["found"] == "PAC2M at 127.0.0.1"
+    key = next(iter(flow["data_schema"].schema))
+    assert key.description["suggested_value"] == "127.0.0.1"
+    assert processor.commands == [] and processor.udp_frames == 0      # read only
+
+
+async def test_identify_ignores_other_telnet_hosts(processor):
+    """Only a Crestron 2-series prompt counts; another telnet banner or a closed port is not a processor."""
+    from custom_components.crestron_pac2m import discovery
+
+    async def _router(reader, writer):
+        writer.write(b"\xff\xfb\x01Router\r\nlogin: ")
+        await writer.drain()
+    router = await asyncio.start_server(_router, "127.0.0.1", PORTS["console"] + 10)
+    try:
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"]) == "PAC2M"
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"] + 10) is None
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"] + 11) is None
+    finally:
+        router.close()
+        await router.wait_closed()
+
+
+async def test_candidate_hosts_cover_the_local_slash_24():
+    from custom_components.crestron_pac2m import discovery
+    adapters = [
+        {"enabled": True, "ipv4": [{"address": "192.168.104.50", "network_prefix": 16}]},
+        {"enabled": True, "ipv4": [{"address": "127.0.0.1", "network_prefix": 8}]},
+        {"enabled": False, "ipv4": [{"address": "10.0.0.5", "network_prefix": 24}]},
+    ]
+    with patch.object(discovery, "async_get_adapters", return_value=adapters):
+        hosts = await discovery.async_candidate_hosts(None)
+    assert len(hosts) == 253 and "192.168.104.50" not in hosts
+    assert all(h.startswith("192.168.104.") for h in hosts)
+
+
+async def test_reconfigure_changes_the_processor_address(hass, processor):
+    entry, _ = await setup_entry(hass)
+    MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "127.0.0.3"}, unique_id="127.0.0.3").add_to_hass(hass)
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id})
+    assert flow["type"].value == "form" and flow["description_placeholders"]["current"] == "127.0.0.1"
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: "not-an-ip"})
+    assert flow["errors"] == {CONF_HOST: "invalid_host"}
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: "127.0.0.3"})
+    assert flow["errors"] == {CONF_HOST: "already_configured"}
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: " 127.0.0.2 "})
+    assert flow["type"].value == "abort" and flow["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.data[CONF_HOST] == "127.0.0.2" and entry.unique_id == "127.0.0.2"
+    assert entry.title == "Mock Title" and entry.options[CONF_MODE] == MODE_CONTROL4     # a renamed title is kept
+    assert entry.state is ConfigEntryState.LOADED and entry.runtime_data.client.host == "127.0.0.2"

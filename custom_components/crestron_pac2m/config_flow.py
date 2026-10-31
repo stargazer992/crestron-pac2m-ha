@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -10,6 +11,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 
+from . import discovery
 from .const import (
     ADOPT_DRY_RUN_DEFAULT,
     CONF_CONTROL4_HOST,
@@ -23,6 +25,9 @@ from .const import (
     NOTIFY_SERVICE,
 )
 from .operations import async_go_standalone, async_return_to_control4, find_control4_host
+
+_LOGGER = logging.getLogger(__name__)
+SCAN_TOTAL_SECONDS = 15
 
 
 def _valid_ip(value: str) -> bool:
@@ -38,6 +43,22 @@ class CrestronConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        self._found: dict[str, str] | None = None      # {ip: model} from the network scan, done once per flow
+
+    async def _async_found(self) -> dict[str, str]:
+        if self._found is None:
+            try:
+                hosts = await discovery.async_candidate_hosts(self.hass)
+                self._found = await asyncio.wait_for(discovery.async_scan(hosts), SCAN_TOTAL_SECONDS)
+            except Exception:  # the scan is only a convenience; typing the address always works
+                _LOGGER.exception("Crestron network scan failed")
+                self._found = {}
+        return self._found
+
+    def _host_schema(self, suggested: str) -> vol.Schema:
+        return vol.Schema({vol.Required(CONF_HOST, description={"suggested_value": suggested}): str})
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -48,14 +69,42 @@ class CrestronConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(host)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=f"Crestron PAC2M ({host})", data={CONF_HOST: host}, options={CONF_MODE: DEFAULT_MODE})
+        configured = {entry.data.get(CONF_HOST) for entry in self._async_current_entries()}
+        found = {ip: model for ip, model in (await self._async_found()).items() if ip not in configured}
+        suggested = (user_input or {}).get(CONF_HOST) or next(iter(found), DEFAULT_HOST)
         return self.async_show_form(
-            step_id="user", data_schema=vol.Schema({vol.Required(CONF_HOST, default=DEFAULT_HOST): str}), errors=errors
+            step_id="user", data_schema=self._host_schema(suggested), errors=errors,
+            description_placeholders={"found": _found_text(found)},
+        )
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change the processor address (e.g. it got a new IP). Nothing is sent to the processor."""
+        entry = self._get_reconfigure_entry()
+        current = entry.data[CONF_HOST]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            if not _valid_ip(host):
+                errors[CONF_HOST] = "invalid_host"
+            elif any(other.entry_id != entry.entry_id and host in (other.unique_id, other.data.get(CONF_HOST))
+                     for other in self._async_current_entries()):
+                errors[CONF_HOST] = "already_configured"
+            else:
+                title = f"Crestron PAC2M ({host})" if entry.title == f"Crestron PAC2M ({current})" else entry.title   # keep a renamed title
+                return self.async_update_reload_and_abort(entry, unique_id=host, title=title, data_updates={CONF_HOST: host})
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=self._host_schema((user_input or {}).get(CONF_HOST) or current), errors=errors,
+            description_placeholders={"found": _found_text(await self._async_found()), "current": current},
         )
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return CrestronOptionsFlow()
+
+
+def _found_text(found: dict[str, str]) -> str:
+    return ", ".join(f"{model} at {ip}" for ip, model in found.items()) or "nothing (type the address)"
 
 
 class CrestronOptionsFlow(OptionsFlow):
