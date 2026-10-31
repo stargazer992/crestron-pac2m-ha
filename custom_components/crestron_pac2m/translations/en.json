@@ -3,17 +3,26 @@
     "step": {
       "user": {
         "title": "Crestron PAC2M",
-        "description": "Adding the integration does NOT change the processor. It starts passive: it sends nothing and the lights stay unavailable until you choose 'Go stand-alone' under Configure.",
+        "description": "Found on the network: {found}.\n\nAdding the integration does NOT change the processor. It starts passive: it sends nothing and the lights stay unavailable until you choose 'Go stand-alone' under Configure.",
+        "data": {
+          "host": "Crestron processor IP address"
+        }
+      },
+      "reconfigure": {
+        "title": "Crestron processor address",
+        "description": "Current address: {current}. Found on the network: {found}.\n\nOnly changes the address Home Assistant uses to reach the processor (for example after it got a new IP). Nothing is sent to the processor and the mode stays the same.",
         "data": {
           "host": "Crestron processor IP address"
         }
       }
     },
     "error": {
-      "invalid_host": "Enter a valid IPv4 address"
+      "invalid_host": "Enter a valid IPv4 address",
+      "already_configured": "Another entry already uses this processor"
     },
     "abort": {
-      "already_configured": "This processor is already configured"
+      "already_configured": "This processor is already configured",
+      "reconfigure_successful": "The processor address is updated"
     }
   },
   "options": {
@@ -24,7 +33,7 @@
         "menu_options": {
           "standalone": "Go stand-alone (processor points to Home Assistant)",
           "control4": "Return to Control4 (processor points to Control4, integration disables itself)",
-          "settings": "Address overrides"
+          "settings": "Settings (address overrides, phone notification)"
         }
       },
       "standalone": {
@@ -42,13 +51,17 @@
         }
       },
       "settings": {
-        "title": "Address overrides",
-        "description": "Only needed if the addresses cannot be found automatically. Leave empty for automatic.",
+        "title": "Settings",
+        "description": "The two addresses are only needed if they cannot be found automatically; leave them empty for automatic. The phone notification service gets a short message for every switch and warning (empty = persistent notification only).",
         "data": {
           "control4_host": "Control4 server IP",
-          "ha_host": "Home Assistant IP"
+          "ha_host": "Home Assistant IP",
+          "notify_service": "Phone notification service (notify.<name>)"
         }
       }
+    },
+    "error": {
+      "invalid_host": "Enter a valid IPv4 address"
     },
     "progress": {
       "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window."

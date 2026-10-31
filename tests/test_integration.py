@@ -2,24 +2,37 @@
 import asyncio
 from unittest.mock import patch
 
+from homeassistant.components.persistent_notification import (
+    _async_get_or_create_notifications,
+)
 from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
-from homeassistant.helpers import area_registry as ar, entity_registry as er, label_registry as lr
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import label_registry as lr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.crestron_pac2m.const import (
-    CONF_HA_HOST, CONF_HOST, CONF_MODE, DOMAIN, MODE_CONTROL4, MODE_STANDALONE,
+    CONF_HA_HOST,
+    CONF_HOST,
+    CONF_MODE,
+    DOMAIN,
+    MODE_CONTROL4,
+    MODE_STANDALONE,
 )
-from custom_components.crestron_pac2m.operations import async_go_standalone, async_return_to_control4
+from custom_components.crestron_pac2m.operations import (
+    async_go_standalone,
+    async_return_to_control4,
+)
 
 from .conftest import C4_IP, HA_IP, PORTS
 
 LEGACY = "light.dimmer_sconces"       # join 0x127 in the real map
 
 
-async def setup_entry(hass, mode=MODE_CONTROL4):
+async def setup_entry(hass, mode=MODE_CONTROL4, **options):
     c4 = MockConfigEntry(domain="control4", data={"host": C4_IP})
     c4.add_to_hass(hass)
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "127.0.0.1"}, options={CONF_MODE: mode, CONF_HA_HOST: HA_IP}, unique_id="127.0.0.1")
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "127.0.0.1"}, options={CONF_MODE: mode, CONF_HA_HOST: HA_IP, **options}, unique_id="127.0.0.1")
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -186,7 +199,8 @@ async def test_label_check_flags_wrong_mapping(hass, processor):
         assert texts and "0x0124" in texts[0] and "WRONG NAME" in texts[0]
         await asyncio.sleep(2.0)                           # regression: it used to re-run endlessly (a notification every few seconds)
         assert len([c for c in notify.call_args_list if "MISMATCH" in str(c.args)]) == 1
-    assert hass.states.get("binary_sensor.crestron_pac2m_link").attributes["label_mismatches"] == 2
+    link = hass.states.get("binary_sensor.crestron_pac2m_link").attributes
+    assert link["label_mismatches"] == 2 and link["label_check"] == "mismatch"
 
 
 def test_label_compare_unit():
@@ -225,3 +239,173 @@ async def test_state_restored_after_restart_without_dump(hass, processor):
     import custom_components.crestron_pac2m.protocol as protocol
     processor.send_data(protocol.analog_payload(0x124, 0xFFFF))
     assert await wait_state(hass, "light.crestron_pac2m_theater_downlights", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")
+
+
+async def test_keypad_events_after_restart_without_dump(hass, processor):
+    """Real behavior: after a Home Assistant restart no hello arrives; keypad presses must still become events."""
+    from custom_components.crestron_pac2m import protocol
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    events = []
+    hass.bus.async_listen("crestron_pac2m_digital", lambda e: events.append(e.data))
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.state == "on")
+    processor.send_data(protocol.digital_payload(0x0042, True))
+    for _ in range(40):
+        if events:
+            break
+        await asyncio.sleep(0.05)
+    assert events == [{"join": 0x42, "join_hex": "0x0042", "state": "high"}]
+    # no name dump after a restart: the label check says so instead of reporting 0 mismatches
+    assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.attributes["label_check"] == "no_dump")
+    assert hass.states.get("binary_sensor.crestron_pac2m_link").attributes["label_mismatches"] is None
+
+
+async def test_turn_on_after_restart_returns_to_restored_level(hass, processor):
+    """A light restored at 50% must come back at 50% on a plain "turn on", not at 100%."""
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    mock_restore_cache(hass, [State("light.crestron_pac2m_theater_sconces_2", "on", {"brightness": 128})])
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "on")
+    await hass.services.async_call("light", "turn_on", {"entity_id": "light.crestron_pac2m_theater_sconces_2"}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("crestron_level_source") == "processor")
+    assert processor.levels[0x127] == 128 * 257
+
+
+async def _restarted_standalone(hass, processor, **options):
+    """Processor already points at HA and the session is alive (HA restart: no hello, no dump)."""
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    entry, _ = await setup_entry(hass, mode=MODE_STANDALONE, **options)
+    assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.state == "on")
+    return entry
+
+
+async def test_lost_command_is_sent_once_more(hass, processor):
+    """The processor never saw the first command (no ack): it is resent and the light still changes."""
+    entry = await _restarted_standalone(hass, processor)
+    processor.drop_analog = 1
+    await hass.services.async_call("light", "turn_on", {"entity_id": "light.crestron_pac2m_theater_sconces_2", "brightness": 128}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("brightness") == 128)
+    assert processor.levels[0x127] == 128 * 257 and entry.runtime_data.client.resends == 1
+    await hass.services.async_call("light", "turn_off", {"entity_id": "light.crestron_pac2m_theater_sconces_2"}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "off")
+    await asyncio.sleep(0.4)
+    assert entry.runtime_data.client.resends == 1, "an acked command must not be resent"
+
+
+async def test_retransmitted_frame_is_handled_once(hass, processor):
+    """If our ack is lost the processor sends the same frame again: one keypad press, one event."""
+    from custom_components.crestron_pac2m import protocol
+    entry = await _restarted_standalone(hass, processor)
+    events = []
+    hass.bus.async_listen("crestron_pac2m_digital", lambda e: events.append(e.data))
+    seq = processor.seq
+    processor.send_data(protocol.digital_payload(0x0042, True))
+    processor.send_data(protocol.digital_payload(0x0042, True), seq=seq)
+    processor.send_data(protocol.digital_payload(0x0042, False))
+    for _ in range(40):
+        if len(events) >= 2:
+            break
+        await asyncio.sleep(0.05)
+    await asyncio.sleep(0.2)
+    assert [e["state"] for e in events] == ["high", "low"] and entry.runtime_data.client.duplicates == 1
+
+
+async def test_warns_when_processor_points_at_an_old_home_assistant_address(hass, processor):
+    """Stand-alone, but the IP table still has HA's old address (DHCP change): the link never comes up, so warn."""
+    processor.table_ip = "10.9.9.9"
+    phone = []
+    hass.services.async_register("notify", "test_phone", lambda call: phone.append(call.data))
+    await setup_entry(hass, mode=MODE_STANDALONE, notify_service="notify.test_phone")
+    notifications = _async_get_or_create_notifications(hass)
+    for _ in range(60):
+        if "crestron_pac2m_address" in notifications:
+            break
+        await asyncio.sleep(0.05)
+    text = notifications["crestron_pac2m_address"]["message"]
+    assert "10.9.9.9" in text and HA_IP in text
+    await hass.async_block_till_done()
+    assert phone and "10.9.9.9" in phone[0]["message"]
+    assert processor.table_ip == "10.9.9.9" and processor.reboots == 0     # read only
+
+
+async def test_no_address_warning_when_link_is_up(hass, processor):
+    await _restarted_standalone(hass, processor)
+    await asyncio.sleep(0.8)
+    assert "crestron_pac2m_address" not in _async_get_or_create_notifications(hass)
+    assert processor.commands == []                     # the console was never opened
+
+
+async def test_settings_validate_and_clear(hass, processor):
+    entry, _ = await setup_entry(hass)
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "settings"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"control4_host": "c4.local", "ha_host": "10.1.1.120"})
+    assert flow["type"].value == "form" and flow["errors"] == {"control4_host": "invalid_host"}
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"ha_host": " 10.1.1.120 ", "notify_service": "notify.my_phone"})
+    assert flow["type"].value == "create_entry"
+    assert entry.options[CONF_HA_HOST] == "10.1.1.120" and entry.options["control4_host"] == ""
+    assert entry.options["notify_service"] == "my_phone" and entry.options[CONF_MODE] == MODE_CONTROL4
+
+
+async def test_config_flow_finds_the_processor(hass, processor):
+    """The scan pre-fills the processor's address and never sends anything to it."""
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert flow["type"].value == "form" and flow["description_placeholders"]["found"] == "PAC2M at 127.0.0.1"
+    key = next(iter(flow["data_schema"].schema))
+    assert key.description["suggested_value"] == "127.0.0.1"
+    assert processor.commands == [] and processor.udp_frames == 0      # read only
+
+
+async def test_identify_ignores_other_telnet_hosts(processor):
+    """Only a Crestron 2-series prompt counts; another telnet banner or a closed port is not a processor."""
+    from custom_components.crestron_pac2m import discovery
+
+    async def _router(reader, writer):
+        writer.write(b"\xff\xfb\x01Router\r\nlogin: ")
+        await writer.drain()
+    router = await asyncio.start_server(_router, "127.0.0.1", PORTS["console"] + 10)
+    try:
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"]) == "PAC2M"
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"] + 10) is None
+        assert await discovery.async_identify("127.0.0.1", PORTS["console"] + 11) is None
+    finally:
+        router.close()
+        await router.wait_closed()
+
+
+async def test_candidate_hosts_cover_the_local_slash_24():
+    from custom_components.crestron_pac2m import discovery
+    adapters = [
+        {"enabled": True, "ipv4": [{"address": "192.168.104.50", "network_prefix": 16}]},
+        {"enabled": True, "ipv4": [{"address": "127.0.0.1", "network_prefix": 8}]},
+        {"enabled": False, "ipv4": [{"address": "10.0.0.5", "network_prefix": 24}]},
+    ]
+    with patch.object(discovery, "async_get_adapters", return_value=adapters):
+        hosts = await discovery.async_candidate_hosts(None)
+    assert len(hosts) == 253 and "192.168.104.50" not in hosts
+    assert all(h.startswith("192.168.104.") for h in hosts)
+
+
+async def test_reconfigure_changes_the_processor_address(hass, processor):
+    entry, _ = await setup_entry(hass)
+    MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "127.0.0.3"}, unique_id="127.0.0.3").add_to_hass(hass)
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id})
+    assert flow["type"].value == "form" and flow["description_placeholders"]["current"] == "127.0.0.1"
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: "not-an-ip"})
+    assert flow["errors"] == {CONF_HOST: "invalid_host"}
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: "127.0.0.3"})
+    assert flow["errors"] == {CONF_HOST: "already_configured"}
+    flow = await hass.config_entries.flow.async_configure(flow["flow_id"], {CONF_HOST: " 127.0.0.2 "})
+    assert flow["type"].value == "abort" and flow["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.data[CONF_HOST] == "127.0.0.2" and entry.unique_id == "127.0.0.2"
+    assert entry.title == "Mock Title" and entry.options[CONF_MODE] == MODE_CONTROL4     # a renamed title is kept
+    assert entry.state is ConfigEntryState.LOADED and entry.runtime_data.client.host == "127.0.0.2"

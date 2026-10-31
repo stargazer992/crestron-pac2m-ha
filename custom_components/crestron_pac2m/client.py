@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from . import protocol
 from .const import (
+    COMMAND_ACK_TIMEOUT_SECONDS,
     COMMAND_SPACING_SECONDS,
     CRESTRON_PORT,
     KEEPALIVE_DIGITAL_JOIN,
@@ -27,6 +28,7 @@ from .const import (
     LISTEN_PORT,
     LOOP_TICK_SECONDS,
     RETRY_SECONDS,
+    RX_DUPLICATE_SECONDS,
     SESSION_TIMEOUT_SECONDS,
     SOURCE_PORT,
 )
@@ -75,11 +77,16 @@ class CrestronClient:
         self.room_names: dict[int, str] = {}       # name id (even) -> room name; the room of a light is the entry at (its id - 1)
         self.connected = False
         self.dump_complete = False                 # True a few seconds after a hello: joins still without a level are at 0 (the dump omits them)
+        self.dump_in_progress = False              # True from a hello until the dump has settled (digital events are held back)
         self._dump_timer: asyncio.TimerHandle | None = None
         self._digital_listeners: set[Callable[[int, int], None]] = set()   # callback(join, 0/1) for every digital join change
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
         self.frames_rx = 0
         self.frames_tx = 0
+        self.resends = 0                           # light commands sent a second time because no ack came
+        self.duplicates = 0                        # retransmitted frames from the processor that were acked but not handled again
+        self._unacked: dict[int, asyncio.TimerHandle] = {}       # our seq -> resend timer (light commands only)
+        self._recent_rx: dict[int, tuple[bytes, float]] = {}     # processor seq -> (payload, time) to spot retransmits
         self._last_keepalive = -1e9
         self._seq = 0
         self._rx: asyncio.DatagramTransport | None = None
@@ -151,6 +158,8 @@ class CrestronClient:
         if self._dump_timer is not None:
             self._dump_timer.cancel()
             self._dump_timer = None
+        self.dump_in_progress = False
+        self._cancel_unacked()
         if self._task is not None:
             self._task.cancel()
             try:
@@ -197,22 +206,48 @@ class CrestronClient:
         self._tx.sendto(packet, (self.host, self.port))   # unconnected socket: accept replies from any port
         self.frames_tx += 1
 
-    async def _send_payload(self, payload: bytes) -> None:
+    async def _send_payload(self, payload: bytes, confirm: bool = False) -> None:
+        """Send one data frame. confirm=True: send it once more if the processor does not ack it in time."""
         async with self._send_lock:
-            packet = protocol.build_data(self._seq, payload)
-            self._seq = (self._seq + 1) & 0xFF
+            seq = self._seq
+            packet = protocol.build_data(seq, payload)
+            self._seq = (seq + 1) & 0xFF
             try:
                 self._send_raw(packet)
             except OSError as err:
                 _LOGGER.debug("Send failed: %s", err)
                 return
+            if confirm:
+                self._track_ack(seq, packet)
             await asyncio.sleep(COMMAND_SPACING_SECONDS)
+
+    def _track_ack(self, seq: int, packet: bytes) -> None:
+        if (old := self._unacked.pop(seq, None)) is not None:
+            old.cancel()
+        self._unacked[seq] = asyncio.get_running_loop().call_later(COMMAND_ACK_TIMEOUT_SECONDS, self._resend, seq, packet)
+
+    def _resend(self, seq: int, packet: bytes) -> None:
+        """No ack for a light command: send the same frame once more (a level command is safe to repeat)."""
+        self._unacked.pop(seq, None)
+        if not self.connected:
+            return
+        _LOGGER.debug("No ack for seq %d, sending it once more", seq)
+        try:
+            self._send_raw(packet)
+            self.resends += 1
+        except OSError as err:
+            _LOGGER.debug("Resend failed: %s", err)
+
+    def _cancel_unacked(self) -> None:
+        for timer in self._unacked.values():
+            timer.cancel()
+        self._unacked.clear()
 
     async def async_set_level(self, join: int, level: int) -> None:
         """Set an analog join (0 = off, 65535 = full). Raises ConnectionError when the link is down."""
         if not self.connected:
             raise ConnectionError("Crestron link is down")
-        await self._send_payload(protocol.analog_payload(join, level))
+        await self._send_payload(protocol.analog_payload(join, level), confirm=True)
 
     # ---------- receiving ----------
     def handle_datagram(self, data: bytes, addr: tuple, label: str = "") -> None:
@@ -226,12 +261,20 @@ class CrestronClient:
         self.frames_rx += len(frames)
         self._set_connected(True)
         for frame in frames:
-            if frame.kind != "data":
+            if frame.kind == "ack":
+                if (timer := self._unacked.pop(frame.seq, None)) is not None:
+                    timer.cancel()
                 continue
             try:
                 self._send_raw(protocol.build_ack(frame.seq))
             except OSError as err:
                 _LOGGER.debug("Ack send failed: %s", err)
+            # the processor resends a frame whose ack it missed; ack it again but do not handle it twice
+            previous = self._recent_rx.get(frame.seq)
+            self._recent_rx[frame.seq] = (frame.payload, self.last_rx)
+            if previous is not None and previous[0] == frame.payload and self.last_rx - previous[1] < RX_DUPLICATE_SECONDS:
+                self.duplicates += 1
+                continue
             self._handle_event(protocol.decode_payload(frame.payload))
 
     def _handle_event(self, event: protocol.Event) -> None:
@@ -239,12 +282,11 @@ class CrestronClient:
             if self.levels.get(event.join) != event.level:
                 self.levels[event.join] = event.level
                 self._notify_join(event.join)
-            elif event.join not in self.levels:
-                self.levels[event.join] = event.level
         elif event.kind == "digital":
-            # Keypad button presses probably arrive here. Held back until the state dump has settled so the
-            # initial dump does not flood the event bus; the keep-alive echo is ignored.
-            if self.dump_complete and event.join != KEEPALIVE_DIGITAL_JOIN:
+            # Keypad button presses probably arrive here. Held back while a state dump is arriving so it does not
+            # flood the event bus; the keep-alive echo is ignored. After a Home Assistant restart no hello (and no
+            # dump) arrives, so events must flow without one.
+            if not self.dump_in_progress and event.join != KEEPALIVE_DIGITAL_JOIN:
                 for listener in list(self._digital_listeners):
                     try:
                         listener(event.join, event.level)
@@ -263,11 +305,13 @@ class CrestronClient:
         if self._dump_timer is not None:
             self._dump_timer.cancel()
         self.dump_complete = False
+        self.dump_in_progress = True
         self._dump_timer = asyncio.get_running_loop().call_later(DUMP_SETTLE_SECONDS, self._dump_settled)
 
     def _dump_settled(self) -> None:
         self._dump_timer = None
         self.dump_complete = True
+        self.dump_in_progress = False
         _LOGGER.info("Crestron state dump settled (%d levels known); lights without a level are treated as off", len(self.levels))
         self.notify_link()
         for join in range(protocol.JOIN_BASE + 1, protocol.JOIN_BASE + 0x40):
@@ -279,6 +323,8 @@ class CrestronClient:
             return
         self.connected = value
         _LOGGER.info("Crestron link is %s", "UP" if value else "DOWN")
+        if not value:
+            self._cancel_unacked()
         self.notify_link()
         if value:
             # entities that were unavailable must refresh with the (possibly already known) levels

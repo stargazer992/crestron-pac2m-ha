@@ -67,10 +67,11 @@ async def _wait_online(
             con = CrestronConsole(host, CONSOLE_PORT)
             try:
                 await con.async_connect()
+                entry = await con.async_read_entry()
             except ConsoleError:
+                await con.async_close()
                 await asyncio.sleep(POLL_SECONDS)
                 continue
-            entry = await con.async_read_entry()
         if entry is not None and entry.status == "ONLINE" and (ready is None or await ready()):
             return True, con
         await asyncio.sleep(POLL_SECONDS)

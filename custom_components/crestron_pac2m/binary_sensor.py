@@ -40,7 +40,10 @@ class CrestronLink(BinarySensorEntity):
             "mode": self._entry.options.get(CONF_MODE, DEFAULT_MODE),
             "frames_received": self._client.frames_rx,
             "frames_sent": self._client.frames_tx,
+            "commands_resent": self._client.resends,
+            "duplicates_ignored": self._client.duplicates,
             "labels_known": len(self._client.labels),
+            "label_check": self._entry.runtime_data.label_status,
             "label_mismatches": None if report is None else len(report.mismatched),
             "labels_missing": None if report is None else len(report.missing),
         }

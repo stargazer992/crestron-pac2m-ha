@@ -19,7 +19,9 @@ but the protocol notes and tools apply to any PAC2M.
 ## Install
 1. Copy `custom_components/crestron_pac2m` into `/config/custom_components/` (or add this repo to HACS as a custom repository).
 2. Restart Home Assistant.
-3. Settings > Devices & Services > Add Integration > **Crestron PAC2M Lighting** > enter the processor IP (default `192.168.104.111`).
+3. Settings > Devices & Services > Add Integration > **Crestron PAC2M Lighting**. It scans Home Assistant's local network (each network capped at a /24) for a telnet console with a Crestron 2-series prompt (`PAC2M>`) and pre-fills the address it finds (otherwise `192.168.104.111`); type another one if needed. The scan only reads the console banner and sends nothing over UDP.
+
+To change the processor address later (for example after it got a new IP): the integration's menu (three dots) > **Reconfigure**. This only changes where Home Assistant sends to; nothing is sent to the processor and the mode stays the same.
 
 Adding the integration **never changes the processor**. It starts in `control4` mode: passive, nothing sent, 40 lights shown as unavailable.
 
@@ -31,13 +33,13 @@ Tick **Preview only** first - it lists exactly what would happen. Untick it to d
 3. **reboots the processor** (2-4 minutes; lights keep their levels, wall keypads keep working),
 4. waits until the processor reports ONLINE and Home Assistant receives its hello,
 5. moves the existing entity ids to this integration (old Control4 lights are renamed `<id>_control4_old` and disabled; name, icon, area, labels and voice exposure are copied),
-6. sends a persistent notification and a phone notification (`notify.mobile_app_iphone_rg`).
+6. sends a persistent notification and a phone notification (Configure > *Settings* > phone notification service; default `notify.mobile_app_iphone_rg`, empty = none).
 
 If Home Assistant never comes online (firewall, network, wrong IP), the switch **undoes itself** (restores the Control4 address and reboots again).
 
 ## Return to Control4 (and disable this integration)
 Configure > *Return to Control4* (also with a *Preview only* checkbox). It finds the Control4 server address from the Control4
-integration already in Home Assistant (or the override under *Address overrides*), points the processor back at it, reboots,
+integration already in Home Assistant (or the override under *Settings*; overrides must be IPv4 addresses), points the processor back at it, reboots,
 waits for ONLINE, gives the entity ids back to the Control4 lights (re-enabled, Control4 reloaded), and then **disables this integration**
 (re-enable it under Devices & Services if you want to go stand-alone again).
 
@@ -56,8 +58,10 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | IP table edits + reboot + Control4 reconnect | Verified (rollback test, Oct 2026) |
 | All other joins (33 lights) | Derived from the Control4 project; spot-check after cutover |
 | Family Room fan (0x106) | Works on/off from Home Assistant (never worked under Control4); speed control untested |
-| Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`) |
-| Integration inside Home Assistant 2026.10 | 9 automated tests against a simulated processor + console (`tests/`) |
+| Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`, `label_check`). After a Home Assistant restart there is no name dump, so `label_check` is `no_dump` (nothing compared) |
+| Lost packets | A light command with no ack within 1 s is sent once more; a frame the processor retransmits is acked but handled once (Link sensor: `commands_resent`, `duplicates_ignored`). Simulator only |
+| Home Assistant IP changed | Stand-alone with the link down for 60 s: the IP table is read (read only) and a notification (`crestron_pac2m_address`) says if it points at another address. Simulator only |
+| Integration inside Home Assistant 2026.10 | Automated tests against a simulated processor + console (`tests/`) |
 | Integration against the real processor | Verified: cutover done 2026-10-16, all 40 lights respond (v1.5.0) |
 | `device_id` for the new IP table entry | Left to the default (the Control4 entry also has none) |
 

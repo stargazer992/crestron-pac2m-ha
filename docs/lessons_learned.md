@@ -179,3 +179,15 @@ After a fresh dump 17 of 40 lights had no level and showed "unknown". Other auto
 
 ## 16. Keypad groundwork (v1.6.0)
 Every digital join the processor sends (after the state dump has settled; the keep-alive join 4000 is ignored) is fired on the HA bus as event `crestron_pac2m_digital` with `join`, `join_hex` and `state` (high/low). To map a keypad: Developer Tools > Events > listen to `crestron_pac2m_digital`, press one button, note the join. Light on/off feedback also produces digital pairs (see section on feedback), so those joins can be ignored. UNVERIFIED until a real keypad press has been captured.
+
+## 17. Lost packets, address check, honest label check (v1.7.0, simulator only)
+- UDP has no delivery guarantee. A light level command the processor does not ack within `COMMAND_ACK_TIMEOUT_SECONDS` (1 s) is sent once more with the same sequence number (a level command is safe to repeat). Keep-alives are not resent (the next one follows anyway).
+- If our ack is lost the processor resends the same frame. A frame with the same sequence number and payload within `RX_DUPLICATE_SECONDS` (5 s) is acked again but not handled twice, so one keypad press is one `crestron_pac2m_digital` event.
+- If Home Assistant's IP changes (DHCP), the processor keeps sending to the old address and the link never comes up. In stand-alone mode, after `ADDRESS_CHECK_DELAY_SECONDS` (60 s) of link down, the console's `ipt` entry is read (never changed) and compared with HA's address; a mismatch raises notification `crestron_pac2m_address`. Fix with *Go stand-alone* (re-points and reboots) or a DHCP reservation.
+- After an HA restart there is no name dump (section 14), so the label check used to report 0 mismatches / 40 missing, which looked like a pass. It now skips the comparison and the Link sensor shows `label_check: no_dump` (other values: `pending`, `ok`, `mismatch`).
+- UNVERIFIED on the real processor: whether it ever retransmits frames, and how long it waits for an ack.
+
+## 18. Finding the processor, changing its address (v1.8.0)
+- Add Integration scans Home Assistant's local IPv4 networks (each capped at a /24) for a telnet console (port 23) whose prompt is a Crestron 2-series one (`PAC2M>`) and pre-fills the first one found. Read only: it opens the console, reads the banner and closes it. No UDP is sent, because a probe on 41794 while Control4 owns the processor is untested and adding the integration must never touch the lights side. The console accepts one session at a time, so the scan holds it for at most ~1.5 s.
+- Reconfigure (three dots on the integration) changes only `entry.data["host"]` and the unique id and reloads; the mode, options and entity ids stay. A renamed entry title is kept.
+- UNVERIFIED on the real network: the scan itself (only tested against the simulator).

@@ -19,6 +19,8 @@ KEEPALIVE_SECONDS = 30                  # Control4 sends ping + join 4000 high t
 RETRY_SECONDS = 15                      # while the link is down, retry the keep-alive this often
 SESSION_TIMEOUT_SECONDS = 90            # no frame (data or ack) for this long = unavailable
 COMMAND_SPACING_SECONDS = 0.05          # pause between commands so a scene does not flood the 2-series processor
+COMMAND_ACK_TIMEOUT_SECONDS = 1.0       # a light command the processor has not acked after this long is sent once more
+RX_DUPLICATE_SECONDS = 5.0              # same sequence number and payload again within this window = a retransmit (acked, not handled twice)
 KEEPALIVE_DIGITAL_JOIN = 4000           # digital join the keep-alive sets high
 LOOP_TICK_SECONDS = 1.0                 # how often the session loop wakes up (keep-alive, timeout and resync checks)
 
@@ -46,11 +48,20 @@ DISABLE_DELAY_SECONDS = 5               # after "return to Control4", disable th
 
 # ---- label verification ----
 LABEL_CHECK_DELAY_SECONDS = 8           # after the link comes up, wait for the name dump, then compare the labels
+LABEL_STATUS_PENDING = "pending"        # Link sensor attribute label_check: not run yet
+LABEL_STATUS_NO_DUMP = "no_dump"        # no name dump since the processor's last reboot (normal after a Home Assistant restart)
+LABEL_STATUS_OK = "ok"
+LABEL_STATUS_MISMATCH = "mismatch"
+
+# ---- address check (Home Assistant's IP changed) ----
+ADDRESS_CHECK_DELAY_SECONDS = 60        # stand-alone and the link down this long: read the IP table and compare it with HA's address
+ADDRESS_NOTIFICATION_ID = "crestron_pac2m_address"
 LABEL_NOTIFICATION_ID = "crestron_pac2m_labels"
 SIGNAL_LABELS_UPDATED = "crestron_pac2m_labels_updated"   # dispatcher signal: refresh the Link sensor attributes
 
 # ---- notifications ----
-NOTIFY_SERVICE = "mobile_app_iphone_rg"  # notify.<this> gets a message in addition to the persistent notification
+CONF_NOTIFY_SERVICE = "notify_service"   # option: notify.<this> gets a short message too (empty = persistent notification only)
+NOTIFY_SERVICE = "mobile_app_iphone_rg"  # default for CONF_NOTIFY_SERVICE
 NOTIFICATION_ID = "crestron_pac2m_switch"
 
 # ---- light behaviour ----
