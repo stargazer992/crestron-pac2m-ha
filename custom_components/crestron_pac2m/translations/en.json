@@ -56,7 +56,7 @@
         "data": {
           "control4_host": "Control4 server IP",
           "ha_host": "Home Assistant IP",
-          "notify_service": "Phone notification service (notify.<name>)"
+          "notify_service": "Phone notification service (the part after notify.)"
         }
       }
     },
