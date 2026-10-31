@@ -225,3 +225,36 @@ async def test_state_restored_after_restart_without_dump(hass, processor):
     import custom_components.crestron_pac2m.protocol as protocol
     processor.send_data(protocol.analog_payload(0x124, 0xFFFF))
     assert await wait_state(hass, "light.crestron_pac2m_theater_downlights", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")
+
+
+async def test_keypad_events_after_restart_without_dump(hass, processor):
+    """Real behavior: after a Home Assistant restart no hello arrives; keypad presses must still become events."""
+    from custom_components.crestron_pac2m import protocol
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    events = []
+    hass.bus.async_listen("crestron_pac2m_digital", lambda e: events.append(e.data))
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.state == "on")
+    processor.send_data(protocol.digital_payload(0x0042, True))
+    for _ in range(40):
+        if events:
+            break
+        await asyncio.sleep(0.05)
+    assert events == [{"join": 0x42, "join_hex": "0x0042", "state": "high"}]
+
+
+async def test_turn_on_after_restart_returns_to_restored_level(hass, processor):
+    """A light restored at 50% must come back at 50% on a plain "turn on", not at 100%."""
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    mock_restore_cache(hass, [State("light.crestron_pac2m_theater_sconces_2", "on", {"brightness": 128})])
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "on")
+    await hass.services.async_call("light", "turn_on", {"entity_id": "light.crestron_pac2m_theater_sconces_2"}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("crestron_level_source") == "processor")
+    assert processor.levels[0x127] == 128 * 257

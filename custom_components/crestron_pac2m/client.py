@@ -75,6 +75,7 @@ class CrestronClient:
         self.room_names: dict[int, str] = {}       # name id (even) -> room name; the room of a light is the entry at (its id - 1)
         self.connected = False
         self.dump_complete = False                 # True a few seconds after a hello: joins still without a level are at 0 (the dump omits them)
+        self.dump_in_progress = False              # True from a hello until the dump has settled (digital events are held back)
         self._dump_timer: asyncio.TimerHandle | None = None
         self._digital_listeners: set[Callable[[int, int], None]] = set()   # callback(join, 0/1) for every digital join change
         self.last_rx = 0.0                         # monotonic time of the last frame from the processor
@@ -151,6 +152,7 @@ class CrestronClient:
         if self._dump_timer is not None:
             self._dump_timer.cancel()
             self._dump_timer = None
+        self.dump_in_progress = False
         if self._task is not None:
             self._task.cancel()
             try:
@@ -239,12 +241,11 @@ class CrestronClient:
             if self.levels.get(event.join) != event.level:
                 self.levels[event.join] = event.level
                 self._notify_join(event.join)
-            elif event.join not in self.levels:
-                self.levels[event.join] = event.level
         elif event.kind == "digital":
-            # Keypad button presses probably arrive here. Held back until the state dump has settled so the
-            # initial dump does not flood the event bus; the keep-alive echo is ignored.
-            if self.dump_complete and event.join != KEEPALIVE_DIGITAL_JOIN:
+            # Keypad button presses probably arrive here. Held back while a state dump is arriving so it does not
+            # flood the event bus; the keep-alive echo is ignored. After a Home Assistant restart no hello (and no
+            # dump) arrives, so events must flow without one.
+            if not self.dump_in_progress and event.join != KEEPALIVE_DIGITAL_JOIN:
                 for listener in list(self._digital_listeners):
                     try:
                         listener(event.join, event.level)
@@ -263,11 +264,13 @@ class CrestronClient:
         if self._dump_timer is not None:
             self._dump_timer.cancel()
         self.dump_complete = False
+        self.dump_in_progress = True
         self._dump_timer = asyncio.get_running_loop().call_later(DUMP_SETTLE_SECONDS, self._dump_settled)
 
     def _dump_settled(self) -> None:
         self._dump_timer = None
         self.dump_complete = True
+        self.dump_in_progress = False
         _LOGGER.info("Crestron state dump settled (%d levels known); lights without a level are treated as off", len(self.levels))
         self.notify_link()
         for join in range(protocol.JOIN_BASE + 1, protocol.JOIN_BASE + 0x40):

@@ -90,6 +90,7 @@ class CrestronLight(LightEntity, RestoreEntity):
             elif last.state == "on":
                 brightness = last.attributes.get(ATTR_BRIGHTNESS)
                 self._restored_level = brightness_to_level(brightness) if brightness else LEVEL_FULL
+                self._last_level = self._restored_level      # "turn on" returns to the level from before the restart
         self.async_on_remove(self._client.add_join_listener(self._join, self._join_changed))
         self.async_on_remove(self._client.add_link_listener(self._link_changed))
 
