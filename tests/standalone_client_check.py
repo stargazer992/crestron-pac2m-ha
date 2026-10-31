@@ -6,7 +6,11 @@ The simulated processor mimics what was verified on the real one:
   * then sends hello, names, levels (the state dump) and feedback on every level change
   * stays completely silent when 'silent' is set (what the real one does to a non-table IP)
 """
-import asyncio, importlib, sys, types, pathlib
+import asyncio
+import importlib
+import pathlib
+import sys
+import types
 
 PKG_DIR = pathlib.Path(__file__).resolve().parents[1] / "custom_components" / "crestron_pac2m"
 # load the modules without running the package __init__ (which needs Home Assistant)

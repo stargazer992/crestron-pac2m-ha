@@ -1,6 +1,10 @@
-import struct, sys, datetime
+import datetime
+import struct
+import sys
+
 path = sys.argv[1]
-data = open(path, 'rb').read()
+with open(path, 'rb') as fh:
+    data = fh.read()
 magic = data[:4]
 end = '<' if magic in (b'\xd4\xc3\xb2\xa1', b'\x4d\x3c\xb2\xa1') else '>'
 nano = magic in (b'\x4d\x3c\xb2\xa1', b'\xa1\xb2\x3c\x4d')

@@ -59,6 +59,25 @@ ADDRESS_NOTIFICATION_ID = "crestron_pac2m_address"
 LABEL_NOTIFICATION_ID = "crestron_pac2m_labels"
 SIGNAL_LABELS_UPDATED = "crestron_pac2m_labels_updated"   # dispatcher signal: refresh the Link sensor attributes
 
+# ---- refresh from the processor (fresh state dump after a Home Assistant restart) ----
+REFRESH_PAUSE_SECONDS = 180             # go silent this long so the processor drops the session (UNVERIFIED how long it needs)
+REFRESH_PAUSE_MAX_SECONDS = 900
+REFRESH_WAIT_SECONDS = 60               # after the pause, wait this long for the hello + state dump
+REFRESH_NOTIFICATION_ID = "crestron_pac2m_refresh"
+REFRESH_IDLE = "idle"                   # Link sensor attribute refresh
+REFRESH_PAUSED = "paused"               # silent: no keep-alive, no acks, light commands refused
+REFRESH_WAITING = "waiting"             # keep-alive resumed, waiting for a hello
+REFRESH_DUMP_RECEIVED = "dump_received"
+REFRESH_NO_DUMP = "no_dump"
+
+# ---- diagnostics ----
+FRAME_HISTORY = 100                     # recent frames kept for Download diagnostics
+
+# ---- wall keypads ----
+# digital join -> button name. Each entry becomes an event entity (press / release). Fill in after capturing a press under
+# Developer Tools > Events > crestron_pac2m_digital; every other join still shows on the "Digital join" event entity.
+KEYPAD_BUTTONS: dict[int, str] = {}
+
 # ---- notifications ----
 CONF_NOTIFY_SERVICE = "notify_service"   # option: notify.<this> gets a short message too (empty = persistent notification only)
 NOTIFY_SERVICE = "mobile_app_iphone_rg"  # default for CONF_NOTIFY_SERVICE

@@ -1,7 +1,10 @@
 """Link status: is the processor session alive?"""
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -26,7 +29,7 @@ class CrestronLink(BinarySensorEntity):
     def __init__(self, entry: CrestronConfigEntry) -> None:
         self._entry = entry
         self._client = entry.runtime_data.client
-        self._attr_unique_id = f"{DOMAIN}_link"
+        self._attr_unique_id = f"{entry.entry_id}_link"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)}, name="Crestron PAC2M", manufacturer="Crestron", model="PAC2M")
 
     @property
@@ -46,6 +49,8 @@ class CrestronLink(BinarySensorEntity):
             "label_check": self._entry.runtime_data.label_status,
             "label_mismatches": None if report is None else len(report.mismatched),
             "labels_missing": None if report is None else len(report.missing),
+            "refresh": self._entry.runtime_data.refresh_status,
+            "hellos_received": self._client.hellos,
         }
 
     async def async_added_to_hass(self) -> None:

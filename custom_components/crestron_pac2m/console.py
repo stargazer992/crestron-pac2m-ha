@@ -52,7 +52,7 @@ def normalise_ip(text: str) -> str:
 def parse_ipt(raw: str, cip_id: str = CIP_ID) -> IptEntry | None:
     """Find the CIP_ID row. Handles ONLINE, OFFLINE and the blank-type NOT REG row."""
     for line in raw.replace("\r", "").split("\n"):
-        match = re.match(r"^\s*%s\s+(.*?)\s+(\d+)\s+([\d.]+)\s*$" % re.escape(cip_id), line)
+        match = re.match(rf"^\s*{re.escape(cip_id)}\s+(.*?)\s+(\d+)\s+([\d.]+)\s*$", line)
         if not match:
             continue
         status = "UNKNOWN"
@@ -79,7 +79,7 @@ class CrestronConsole:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self._host, self._port), CONSOLE_CONNECT_TIMEOUT
             )
-        except (OSError, asyncio.TimeoutError) as err:
+        except (TimeoutError, OSError) as err:
             raise ConsoleError(f"Cannot reach the Crestron console at {self._host}:{self._port}: {err}") from err
         banner = await self._read(1.5)
         if not banner and self._reader.at_eof():
@@ -94,7 +94,7 @@ class CrestronConsole:
         while loop.time() < end:
             try:
                 chunk = await asyncio.wait_for(self._reader.read(4096), timeout=min(0.5, max(0.05, end - loop.time())))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 chunk = b""
             except OSError as err:
                 raise ConsoleError(str(err)) from err

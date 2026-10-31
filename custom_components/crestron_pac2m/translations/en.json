@@ -110,6 +110,20 @@
           "description": "Only describe what would happen."
         }
       }
+    },
+    "refresh_from_processor": {
+      "name": "Refresh from processor",
+      "description": "Stand-alone only: go silent so the processor drops the session, then reconnect to get a fresh state dump (current light levels) without a reboot. Experimental.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Only describe what would happen."
+        },
+        "pause_seconds": {
+          "name": "Pause",
+          "description": "How long Home Assistant stays silent. The lights cannot be controlled from Home Assistant meanwhile; wall keypads keep working."
+        }
+      }
     }
   }
 }
