@@ -12,7 +12,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from . import console as console_mod
 from .console import ConsoleError, CrestronConsole, IptEntry
 from .const import (
     AUTO_FAILBACK,
@@ -160,7 +159,7 @@ async def repoint(
     except ConsoleError as err:
         steps.append(f"console error: {err}")
         return SwitchResult(False, False, False, str(err), steps)
-    except Exception as err:  # noqa: BLE001 - report instead of crashing the flow
+    except Exception as err:  # report instead of crashing the flow
         _LOGGER.exception("Unexpected error while re-pointing the processor")
         steps.append(f"unexpected error: {err}")
         return SwitchResult(False, False, False, f"Unexpected error: {err}", steps)

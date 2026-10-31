@@ -191,3 +191,12 @@ Every digital join the processor sends (after the state dump has settled; the ke
 - Add Integration scans Home Assistant's local IPv4 networks (each capped at a /24) for a telnet console (port 23) whose prompt is a Crestron 2-series one (`PAC2M>`) and pre-fills the first one found. Read only: it opens the console, reads the banner and closes it. No UDP is sent, because a probe on 41794 while Control4 owns the processor is untested and adding the integration must never touch the lights side. The console accepts one session at a time, so the scan holds it for at most ~1.5 s.
 - Reconfigure (three dots on the integration) changes only `entry.data["host"]` and the unique id and reloads; the mode, options and entity ids stay. A renamed entry title is kept.
 - UNVERIFIED on the real network: the scan itself (only tested against the simulator).
+
+## 19. Refresh, keypad entities, diagnostics, CI (v1.9.0, simulator only)
+- `crestron_pac2m.refresh_from_processor` tries the untried idea from section 14: Home Assistant goes fully silent (no keep-alive, no acks, light commands refused) for `pause_seconds`, then resumes the keep-alive. If the processor has dropped the session it greets the returning peer with a hello and a full dump. Dry run by default, stand-alone only, never automatic. UNVERIFIED: whether the real processor drops the peer, and after how long. Start with the default 180 s and watch the Link sensor's `refresh` (`dump_received` / `no_dump`); try longer if `no_dump`. `progreset -p:01` was deliberately not automated (restarts the program; effect on the lights untested).
+- Digital joins are also event entities: **Digital join** (catch-all, `high`/`low`) and one entity per entry in `KEYPAD_BUTTONS` (`press`/`release`). Light on/off feedback pairs show on the catch-all too.
+- Download diagnostics includes the last 100 frames each way (hex) and reads the IP table entry (read only, skipped during a switch).
+- The Link sensor's unique id is now `<entry_id>_link` (was `crestron_pac2m_link`); it is migrated at startup and the entity id stays.
+- GitHub Actions runs Ruff, the tests, hassfest and the HACS check on every push/PR and weekly.
+- The Family Room fan relay stays a light entity: changing it to a fan would change its entity id.
+

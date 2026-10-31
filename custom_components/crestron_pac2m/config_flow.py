@@ -7,8 +7,12 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.core import callback
 
 from . import discovery
@@ -24,7 +28,11 @@ from .const import (
     DOMAIN,
     NOTIFY_SERVICE,
 )
-from .operations import async_go_standalone, async_return_to_control4, find_control4_host
+from .operations import (
+    async_go_standalone,
+    async_return_to_control4,
+    find_control4_host,
+)
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_TOTAL_SECONDS = 15

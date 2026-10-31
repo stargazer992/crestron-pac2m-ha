@@ -1,12 +1,15 @@
 """The two switch operations used by the options flow and the services."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from homeassistant.components import persistent_notification
-from homeassistant.config_entries import ConfigEntry, ConfigEntryDisabler
 from homeassistant.components.network import async_get_source_ip
+from homeassistant.config_entries import ConfigEntry, ConfigEntryDisabler
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .adopt import async_adopt, async_release
 from .const import (
@@ -21,6 +24,13 @@ from .const import (
     MODE_STANDALONE,
     NOTIFICATION_ID,
     NOTIFY_SERVICE,
+    REFRESH_DUMP_RECEIVED,
+    REFRESH_NO_DUMP,
+    REFRESH_NOTIFICATION_ID,
+    REFRESH_PAUSED,
+    REFRESH_WAIT_SECONDS,
+    REFRESH_WAITING,
+    SIGNAL_LABELS_UPDATED,
 )
 from .switcher import SwitchResult, repoint
 
@@ -51,7 +61,7 @@ async def async_notify(
         service = notify_service_for(entry)
         if service and hass.services.has_service("notify", service):
             await hass.services.async_call("notify", service, {"title": title, "message": short})
-    except Exception:  # noqa: BLE001
+    except Exception:
         _LOGGER.exception("Could not send the notification")
 
 
@@ -138,3 +148,55 @@ async def async_return_to_control4(hass: HomeAssistant, entry: ConfigEntry, dry_
     if not dry_run:
         await _notify(hass, entry, "Crestron: back to Control4", result)
     return result
+
+
+async def async_refresh_from_processor(hass: HomeAssistant, entry: ConfigEntry, dry_run: bool, seconds: int) -> dict:
+    """Get a fresh state dump without a reboot: go silent until the processor drops the session, then reconnect.
+
+    UNVERIFIED on the real processor (lessons learned section 19). Starts in the background and returns at once.
+    """
+    data = entry.runtime_data
+    client = data.client
+    plan = (
+        f"Home Assistant goes silent for {seconds} s (no keep-alive, no acks). The Crestron lights are unavailable from "
+        f"Home Assistant meanwhile; wall keypads keep working. Then it reconnects and waits up to {REFRESH_WAIT_SECONDS} s "
+        "for the processor's hello and state dump."
+    )
+    if entry.options.get(CONF_MODE) != MODE_STANDALONE:
+        return {"ok": False, "message": "Only possible in stand-alone mode (in Control4 mode the processor talks to Control4)."}
+    if data.switching or data.refresh_status in (REFRESH_PAUSED, REFRESH_WAITING):
+        return {"ok": False, "message": "A switch or a refresh is already running."}
+    if dry_run:
+        return {"ok": True, "message": "Dry run: " + plan}
+
+    def _status(value: str) -> None:
+        data.refresh_status = value
+        async_dispatcher_send(hass, SIGNAL_LABELS_UPDATED)
+
+    async def _run() -> None:
+        hellos = client.hellos
+        try:
+            client.pause(seconds)
+            _status(REFRESH_PAUSED)
+            await asyncio.sleep(seconds)
+            client.resume()
+            _status(REFRESH_WAITING)
+            deadline = time.monotonic() + REFRESH_WAIT_SECONDS
+            while client.hellos == hellos and time.monotonic() < deadline:
+                await asyncio.sleep(0.2)
+        finally:
+            client.resume()
+        if client.hellos != hellos:
+            _status(REFRESH_DUMP_RECEIVED)
+            await async_notify(hass, entry, "Crestron: refreshed", "The processor sent a fresh state dump; the light levels are current.",
+                               "Crestron lights refreshed from the processor", REFRESH_NOTIFICATION_ID)
+        else:
+            _status(REFRESH_NO_DUMP)
+            text = (f"No state dump after a {seconds} s pause: the processor kept the session. Try a longer pause; "
+                    "the lights are back under Home Assistant control with their previous levels.")
+            await async_notify(hass, entry, "Crestron: no fresh state", text, "Crestron refresh: no state dump, try a longer pause",
+                               REFRESH_NOTIFICATION_ID)
+
+    _status(REFRESH_PAUSED)
+    data.refresh_task = entry.async_create_background_task(hass, _run(), "crestron_pac2m_refresh")
+    return {"ok": True, "message": "Started: " + plan}

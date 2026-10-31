@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, LEGACY_PLATFORM, LEGACY_SUFFIX, LIGHTS, RELEASED_SUFFIX
 
@@ -80,7 +81,7 @@ async def async_adopt(hass: HomeAssistant, dry_run: bool) -> tuple[list[str], bo
                     for domain_key, value in old.options.items():       # voice assistant exposure etc.
                         registry.async_update_entity_options(legacy_id, domain_key, dict(value))
             changed = True
-        except Exception as err:  # noqa: BLE001 - one bad entity must not stop the rest
+        except Exception as err:  # one bad entity must not stop the rest
             _LOGGER.exception("Adopt failed for %s", legacy_id)
             messages.append(f"{legacy_id}: ERROR {err}")
     return messages, changed
@@ -109,7 +110,7 @@ async def async_release(hass: HomeAssistant, dry_run: bool) -> tuple[list[str], 
                     update["disabled_by"] = None
                 registry.async_update_entity(parked_id, **update)
             needs_reload = True
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.exception("Release failed for %s", legacy_id)
             messages.append(f"{legacy_id}: ERROR {err}")
     return messages, needs_reload

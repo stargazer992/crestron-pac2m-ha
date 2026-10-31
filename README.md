@@ -60,6 +60,9 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | Family Room fan (0x106) | Works on/off from Home Assistant (never worked under Control4); speed control untested |
 | Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`, `label_check`). After a Home Assistant restart there is no name dump, so `label_check` is `no_dump` (nothing compared) |
 | Lost packets | A light command with no ack within 1 s is sent once more; a frame the processor retransmits is acked but handled once (Link sensor: `commands_resent`, `duplicates_ignored`). Simulator only |
+| Refresh from processor | Service `crestron_pac2m.refresh_from_processor` (stand-alone, dry run by default): Home Assistant goes silent for `pause_seconds` (default 180) so the processor drops the session, then reconnects; a new session brings a hello + full state dump, so light levels changed while HA was down become current. Link sensor attribute `refresh`: `paused`, `waiting`, `dump_received` or `no_dump`. Simulator only: how long the real processor needs is unknown |
+| Keypads | Event entity **Digital join** fires `high`/`low` (attributes `join`, `join_hex`) for every digital join; joins listed in `KEYPAD_BUTTONS` (const.py) get their own event entity with `press`/`release`. No real keypad press captured yet |
+| Diagnostics | Integration menu > Download diagnostics: link state, counters, levels, labels, last 100 frames and the IP table entry (read only) |
 | Home Assistant IP changed | Stand-alone with the link down for 60 s: the IP table is read (read only) and a notification (`crestron_pac2m_address`) says if it points at another address. Simulator only |
 | Integration inside Home Assistant 2026.10 | Automated tests against a simulated processor + console (`tests/`) |
 | Integration against the real processor | Verified: cutover done 2026-10-16, all 40 lights respond (v1.5.0) |
@@ -77,7 +80,7 @@ custom_components/crestron_pac2m/   the integration
   protocol.py   frame encode/decode (no HA imports)      client.py     UDP session, keep-alive, availability (no HA imports)
   console.py    telnet console client (no HA imports)    switcher.py   IP table re-pointing with reboot + failback (no HA imports)
   adopt.py      entity-id takeover / release             operations.py the two switch operations
-  light.py binary_sensor.py config_flow.py __init__.py const.py (every tunable value is in const.py)
+  light.py binary_sensor.py event.py diagnostics.py discovery.py config_flow.py __init__.py const.py (every tunable value is in const.py)
 tests/          pytest (real HA core + fake processor) and standalone_client_check.py
 tools/          reference scripts used during discovery (probe4, theater restore, rollback, pcap parser, join JSON)
 docs/           lessons learned, protocol, runbook, join map
@@ -87,6 +90,7 @@ docs/           lessons learned, protocol, runbook, join map
 ```
 uv venv --python 3.14 .venv && uv pip install --python .venv/bin/python homeassistant pytest-homeassistant-custom-component
 .venv/bin/python -m pytest
+.venv/bin/ruff check .                          # also run by GitHub Actions with hassfest and the HACS check
 python3 tests/standalone_client_check.py      # protocol + client only, no Home Assistant needed
 ```
 

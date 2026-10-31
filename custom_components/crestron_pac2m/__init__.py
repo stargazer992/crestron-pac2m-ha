@@ -9,20 +9,27 @@ crestron_pac2m.go_standalone / crestron_pac2m.return_to_control4 (dry run by def
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.components import persistent_notification
 from homeassistant.components.network import async_get_source_ip
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    HomeAssistant,
+    ServiceCall,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_call_later
 
 from .adopt import async_adopt, async_release
 from .client import CrestronClient
@@ -34,11 +41,11 @@ from .const import (
     CIP_ID,
     CONF_HA_HOST,
     CONF_HOST,
-    EVENT_DIGITAL,
     CONF_MODE,
     CRESTRON_PORT,
     DEFAULT_MODE,
     DOMAIN,
+    EVENT_DIGITAL,
     LABEL_CHECK_DELAY_SECONDS,
     LABEL_NOTIFICATION_ID,
     LABEL_STATUS_MISMATCH,
@@ -46,18 +53,29 @@ from .const import (
     LABEL_STATUS_OK,
     LABEL_STATUS_PENDING,
     LIGHTS,
-    SIGNAL_LABELS_UPDATED,
     LISTEN_PORT,
     MODE_STANDALONE,
+    REFRESH_IDLE,
+    REFRESH_PAUSE_MAX_SECONDS,
+    REFRESH_PAUSE_SECONDS,
+    SIGNAL_LABELS_UPDATED,
     SOURCE_PORT,
 )
 from .labelcheck import LabelReport, compare
-from .operations import async_go_standalone, async_notify, async_return_to_control4
+from .operations import (
+    async_go_standalone,
+    async_notify,
+    async_refresh_from_processor,
+    async_return_to_control4,
+)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.LIGHT, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.LIGHT, Platform.BINARY_SENSOR, Platform.EVENT]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 SERVICE_SCHEMA = vol.Schema({vol.Optional("dry_run", default=ADOPT_DRY_RUN_DEFAULT): cv.boolean})
+REFRESH_SCHEMA = SERVICE_SCHEMA.extend(
+    {vol.Optional("pause_seconds", default=REFRESH_PAUSE_SECONDS): vol.All(vol.Coerce(int), vol.Range(min=1, max=REFRESH_PAUSE_MAX_SECONDS))}
+)
 
 
 @dataclass
@@ -70,6 +88,8 @@ class CrestronData:
     label_status: str = LABEL_STATUS_PENDING          # Link sensor attribute label_check
     address_summary_sent: str = ""                    # last address warning sent (no repeats)
     switching: bool = False                           # a go stand-alone / return to Control4 is using the console
+    refresh_status: str = REFRESH_IDLE                # Link sensor attribute refresh
+    refresh_task: asyncio.Task | None = None
 
 
 type CrestronConfigEntry = ConfigEntry[CrestronData]
@@ -103,6 +123,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 hass.config_entries.async_schedule_reload(c4.entry_id)
         return {"messages": messages}
 
+    async def _refresh(call: ServiceCall) -> dict:
+        return await async_refresh_from_processor(hass, _loaded_entry(hass), call.data["dry_run"], call.data["pause_seconds"])
+
+    hass.services.async_register(DOMAIN, "refresh_from_processor", _refresh, schema=REFRESH_SCHEMA, supports_response=SupportsResponse.OPTIONAL)
     for name, handler in (
         ("go_standalone", _go_standalone),
         ("return_to_control4", _return_to_control4),
@@ -123,6 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
         raise ConfigEntryNotReady(f"Cannot open UDP port for the Crestron feedback: {err}") from err
     data = CrestronData(client)
     entry.runtime_data = data
+    _migrate_link_unique_id(hass, entry)
     _setup_label_check(hass, entry, data)
     _setup_address_check(hass, entry, data)
     try:
@@ -140,6 +165,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry) -> 
 
     entry.async_on_unload(client.add_digital_listener(_digital))
     return True
+
+
+def _migrate_link_unique_id(hass: HomeAssistant, entry: CrestronConfigEntry) -> None:
+    """Up to v1.8 the Link sensor's unique id was not tied to the entry; move it, keeping its entity id."""
+    registry = er.async_get(hass)
+    old = registry.async_get_entity_id(Platform.BINARY_SENSOR, DOMAIN, f"{DOMAIN}_link")
+    if old is not None and (reg_entry := registry.async_get(old)) is not None and reg_entry.config_entry_id == entry.entry_id:
+        registry.async_update_entity(old, new_unique_id=f"{entry.entry_id}_link")
 
 
 def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: CrestronData) -> None:
@@ -173,7 +206,7 @@ def _setup_label_check(hass: HomeAssistant, entry: CrestronConfigEntry, data: Cr
                 data.label_summary_sent = ""
                 persistent_notification.async_dismiss(hass, LABEL_NOTIFICATION_ID)
             async_dispatcher_send(hass, SIGNAL_LABELS_UPDATED)   # refresh the Link sensor (NOT the link listeners: that looped)
-        except Exception:  # noqa: BLE001 - a failed check must never affect the lights
+        except Exception:  # a failed check must never affect the lights
             _LOGGER.exception("Crestron label check failed")
 
     @callback
@@ -264,5 +297,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: CrestronConfigEntry) ->
     """Stop the client and unload the platforms."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        entry.runtime_data.client.resume()
         await entry.runtime_data.client.async_stop()
     return unloaded

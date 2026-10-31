@@ -18,7 +18,10 @@
 #   python3 crestron_rollback.py              roll back (re-point to Control4, reboot, verify)
 #   python3 crestron_rollback.py --check      only show the IP table, change nothing
 #   python3 crestron_rollback.py --no-reboot  change the table but do not reboot (reboot it yourself later)
-import re, socket, sys, time
+import re
+import socket
+import sys
+import time
 
 # ---- settings (all values here) ----
 CRESTRON_IP = "192.168.104.111"      # Crestron processor
@@ -63,7 +66,7 @@ class Console:
                 out += chunk
                 if stop_at_prompt and PROMPT.encode() in out:
                     break
-            except socket.timeout:
+            except TimeoutError:
                 pass
         return re.sub(rb"\xff[\xfb-\xfe].", b"", out).decode("latin-1").replace("\r", "")
 
@@ -83,7 +86,7 @@ def read_entry(console):
     # a row looks like:  "6  CIP  ONLINE  41794  192.168.104.025"  or  "6      NOT REG   41794  192.168.104.025"
     raw = console.run("ipt")
     for line in raw.split("\n"):
-        m = re.match(r"^\s*%s\s+(.*?)\s+(\d+)\s+([\d.]+)\s*$" % re.escape(CIP_ID), line)
+        m = re.match(rf"^\s*{re.escape(CIP_ID)}\s+(.*?)\s+(\d+)\s+([\d.]+)\s*$", line)
         if not m:
             continue
         middle = m.group(1)
@@ -120,7 +123,7 @@ def wait_online(console):
     end = time.time() + WAIT_ONLINE_SECONDS
     last = None
     while time.time() < end:
-        raw, entry = read_entry(console)
+        _raw, entry = read_entry(console)
         status = entry["status"] if entry else "MISSING"
         if status != last:
             say(f"  status: {status}")
@@ -188,7 +191,7 @@ def main():
         say("The entry is correct but not ONLINE yet. Control4 may need a minute, or a driver refresh in Composer.")
         say("Run 'python3 crestron_rollback.py --check' again in a minute.")
         return 4
-    except Exception as exc:                 # report and stop cleanly, never leave a half-open session
+    except Exception as exc:  # noqa: BLE001 - report and stop cleanly, never leave a half-open session
         say(f"Unexpected error: {exc}")
         return 5
     finally:

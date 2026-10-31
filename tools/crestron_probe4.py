@@ -8,7 +8,11 @@
 #   3. Cycles the 7 Theater joins on/off and reports whether the Crestron answered each command.
 # Run only while the Mac's Wi-Fi is 192.168.104.25 and the Control4 cable is unplugged.
 # Usage: python3 crestron_probe4.py
-import os, re, socket, threading, time
+import os
+import re
+import socket
+import threading
+import time
 
 # ---- settings (all values here; the environment overrides exist only for local testing) ----
 CRESTRON_IP = os.environ.get("CRESTRON_IP", "192.168.104.111")
@@ -39,7 +43,7 @@ names = {}                      # id -> text
 analog = {}                     # join -> level
 fb_flag = threading.Event()     # set when the Crestron reports a level for watch_join
 watch_join = PRIME_JOIN
-log = open(LOG_FILE, "w")
+log = open(LOG_FILE, "w")  # noqa: SIM115 - stays open for the whole run
 
 
 def stamp():
@@ -82,7 +86,7 @@ def decode(data):
                 fb_flag.set()                                   # processor applied / reported our command
         elif body[3] == 0x12 and len(body) >= 5:               # device name
             names[body[4]] = body[5:3 + body[2]].decode("latin-1")
-    except Exception as exc:                                    # keep going on any odd packet
+    except Exception as exc:  # noqa: BLE001 - keep going on any odd packet
         logline(f"decode error: {exc}")
 
 
@@ -154,7 +158,7 @@ def console_ipt(label):
                     if not chunk:
                         break
                     out += chunk
-                except socket.timeout:
+                except TimeoutError:
                     pass
             return out
 
@@ -166,7 +170,7 @@ def console_ipt(label):
         for line in raw.decode("latin-1").replace("\r", "").split("\n"):
             if line.strip():
                 say("  " + line.rstrip())
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a probe script reports every error and carries on
         say(f"  could not read the console: {exc}")
 
 

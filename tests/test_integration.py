@@ -231,12 +231,12 @@ async def test_state_restored_after_restart_without_dump(hass, processor):
         State("light.crestron_pac2m_theater_sconces_2", "on", {"brightness": 128}),
         State("light.crestron_pac2m_theater_downlights", "off"),
     ])
-    entry, _ = await setup_entry(hass, mode=MODE_STANDALONE)
+    await setup_entry(hass, mode=MODE_STANDALONE)
     assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "on" and s.attributes["brightness"] == 128, timeout=5)
     state = hass.states.get("light.crestron_pac2m_theater_downlights")
     assert state.state == "off" and state.attributes["crestron_level_source"] == "restored"
     # the first real feedback replaces the restored value
-    import custom_components.crestron_pac2m.protocol as protocol
+    from custom_components.crestron_pac2m import protocol
     processor.send_data(protocol.analog_payload(0x124, 0xFFFF))
     assert await wait_state(hass, "light.crestron_pac2m_theater_downlights", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")
 
@@ -409,3 +409,81 @@ async def test_reconfigure_changes_the_processor_address(hass, processor):
     assert entry.data[CONF_HOST] == "127.0.0.2" and entry.unique_id == "127.0.0.2"
     assert entry.title == "Mock Title" and entry.options[CONF_MODE] == MODE_CONTROL4     # a renamed title is kept
     assert entry.state is ConfigEntryState.LOADED and entry.runtime_data.client.host == "127.0.0.2"
+
+
+async def test_refresh_from_processor_gets_a_fresh_dump(hass, processor):
+    """After an HA restart there is no dump; going silent until the processor drops the session brings one."""
+    from homeassistant.exceptions import HomeAssistantError
+    entry = await _restarted_standalone(hass, processor)
+    processor.peer_timeout = 0.5
+    downlights = "light.crestron_pac2m_theater_downlights"
+    assert hass.states.get(downlights).state == "unknown"
+    dry = await hass.services.async_call(DOMAIN, "refresh_from_processor", {}, blocking=True, return_response=True)
+    assert dry["ok"] and dry["message"].startswith("Dry run") and not entry.runtime_data.client.paused
+    started = await hass.services.async_call(DOMAIN, "refresh_from_processor", {"dry_run": False, "pause_seconds": 1}, blocking=True, return_response=True)
+    assert started["ok"] and entry.runtime_data.client.paused
+    try:
+        await hass.services.async_call("light", "turn_on", {"entity_id": downlights}, blocking=True)
+        raise AssertionError("a command during the pause must be refused")
+    except HomeAssistantError:
+        pass
+    assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.attributes["refresh"] == "dump_received", timeout=8)
+    assert await wait_state(hass, downlights, lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")
+    assert not entry.runtime_data.client.paused
+
+
+async def test_refresh_reports_when_no_dump_comes(hass, processor):
+    from custom_components.crestron_pac2m import operations
+    with patch.object(operations, "REFRESH_WAIT_SECONDS", 0.5):
+        entry = await _restarted_standalone(hass, processor)
+        await hass.services.async_call(DOMAIN, "refresh_from_processor", {"dry_run": False, "pause_seconds": 1}, blocking=True, return_response=True)
+        assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.attributes["refresh"] == "no_dump", timeout=8)
+    assert not entry.runtime_data.client.paused
+    assert "crestron_pac2m_refresh" in _async_get_or_create_notifications(hass)
+    await hass.services.async_call("light", "turn_on", {"entity_id": "light.crestron_pac2m_theater_sconces_2", "brightness": 128}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("brightness") == 128)
+
+
+async def test_refresh_refused_in_control4_mode(hass, processor):
+    await setup_entry(hass, mode=MODE_CONTROL4)
+    result = await hass.services.async_call(DOMAIN, "refresh_from_processor", {"dry_run": False}, blocking=True, return_response=True)
+    assert not result["ok"] and processor.udp_frames == 0
+
+
+async def test_digital_joins_and_keypad_buttons_as_event_entities(hass, processor):
+    from custom_components.crestron_pac2m import event, protocol
+    with patch.dict(event.KEYPAD_BUTTONS, {0x43: "Theater button 1"}):
+        await _restarted_standalone(hass, processor)
+        processor.send_data(protocol.digital_payload(0x0042, True))
+        assert await wait_state(hass, "event.crestron_pac2m_digital_join", lambda s: s.attributes.get("event_type") == "high" and s.attributes.get("join") == 0x42)
+        processor.send_data(protocol.digital_payload(0x0043, True))
+        assert await wait_state(hass, "event.crestron_pac2m_theater_button_1", lambda s: s.attributes.get("event_type") == "press")
+        processor.send_data(protocol.digital_payload(0x0043, False))
+        assert await wait_state(hass, "event.crestron_pac2m_theater_button_1", lambda s: s.attributes.get("event_type") == "release")
+        assert hass.states.get("event.crestron_pac2m_digital_join").attributes["join"] == 0x42, "mapped buttons stay off the catch-all"
+
+
+async def test_link_unique_id_moves_to_the_entry(hass, processor):
+    """Up to v1.8 the Link sensor's unique id was not tied to the entry; the entity id must survive the move."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: "127.0.0.1"}, options={CONF_MODE: MODE_CONTROL4}, unique_id="127.0.0.1")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create("binary_sensor", DOMAIN, f"{DOMAIN}_link", suggested_object_id="crestron_pac2m_link", config_entry=entry)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    reg_entry = registry.async_get("binary_sensor.crestron_pac2m_link")
+    assert reg_entry.unique_id == f"{entry.entry_id}_link"
+    assert hass.states.get("binary_sensor.crestron_pac2m_link") is not None
+    assert registry.async_get_entity_id("binary_sensor", DOMAIN, f"{DOMAIN}_link") is None
+
+
+async def test_diagnostics(hass, processor):
+    from custom_components.crestron_pac2m.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+    entry = await _restarted_standalone(hass, processor)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["link"]["connected"] and diag["link"]["refresh"] == "idle"
+    assert diag["ip_table"] == {"status": "ONLINE", "port": "41794", "ip": HA_IP}
+    assert {f["dir"] for f in diag["recent_frames"]} == {"rx", "tx"}
+    assert diag["label_check"]["status"] in ("pending", "no_dump")

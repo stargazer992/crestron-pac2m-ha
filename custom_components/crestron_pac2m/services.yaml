@@ -23,3 +23,16 @@ release_entity_ids:
       default: true
       selector:
         boolean:
+refresh_from_processor:
+  fields:
+    dry_run:
+      default: true
+      selector:
+        boolean:
+    pause_seconds:
+      default: 180
+      selector:
+        number:
+          min: 1
+          max: 900
+          unit_of_measurement: s

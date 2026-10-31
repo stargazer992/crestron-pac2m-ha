@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 
 from . import protocol
@@ -22,8 +23,9 @@ from .const import (
     COMMAND_ACK_TIMEOUT_SECONDS,
     COMMAND_SPACING_SECONDS,
     CRESTRON_PORT,
-    KEEPALIVE_DIGITAL_JOIN,
     DUMP_SETTLE_SECONDS,
+    FRAME_HISTORY,
+    KEEPALIVE_DIGITAL_JOIN,
     KEEPALIVE_SECONDS,
     LISTEN_PORT,
     LOOP_TICK_SECONDS,
@@ -49,7 +51,7 @@ class _Endpoint(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple) -> None:
         try:
             self._client.handle_datagram(data, addr, self._label)
-        except Exception:  # noqa: BLE001 - one bad packet must never stop the session
+        except Exception:  # one bad packet must never stop the session
             _LOGGER.exception("Error handling a datagram from %s", addr)
 
     def error_received(self, exc: Exception) -> None:
@@ -87,6 +89,10 @@ class CrestronClient:
         self.duplicates = 0                        # retransmitted frames from the processor that were acked but not handled again
         self._unacked: dict[int, asyncio.TimerHandle] = {}       # our seq -> resend timer (light commands only)
         self._recent_rx: dict[int, tuple[bytes, float]] = {}     # processor seq -> (payload, time) to spot retransmits
+        self.hellos = 0                            # hellos received (a new session: a state dump follows)
+        self.paused_until = 0.0                    # monotonic time; while paused we are silent so the processor drops the session
+        self.ignored_while_paused = 0
+        self.history: deque[tuple[float, str, str]] = deque(maxlen=FRAME_HISTORY)   # (monotonic, "rx"/"tx", hex) for diagnostics
         self._last_keepalive = -1e9
         self._seq = 0
         self._rx: asyncio.DatagramTransport | None = None
@@ -120,14 +126,14 @@ class CrestronClient:
         for callback in list(self._link_listeners):
             try:
                 callback()
-            except Exception:  # noqa: BLE001 - keep notifying the others
+            except Exception:  # keep notifying the others
                 _LOGGER.exception("Link listener failed")
 
     def _notify_join(self, join: int) -> None:
         for callback in list(self._join_listeners.get(join, ())):
             try:
                 callback(join)
-            except Exception:  # noqa: BLE001
+            except Exception:  # never let the loop die
                 _LOGGER.exception("Join listener failed for join 0x%04X", join)
 
     # ---------- lifecycle ----------
@@ -175,13 +181,27 @@ class CrestronClient:
         await asyncio.sleep(0)
         self._set_connected(False)
 
+    @property
+    def paused(self) -> bool:
+        return time.monotonic() < self.paused_until
+
+    def pause(self, seconds: float) -> None:
+        """Go silent (no keep-alive, no acks, no commands) so the processor treats us as offline; resumes by itself."""
+        self.paused_until = time.monotonic() + seconds
+        self._cancel_unacked()
+        _LOGGER.info("Crestron session paused for %s s to get a fresh state dump", seconds)
+
+    def resume(self) -> None:
+        self.paused_until = 0.0
+        self._last_keepalive = -1e9                # send the keep-alive right away
+
     # ---------- keep-alive loop ----------
     async def _run(self) -> None:
         """Session loop: keep-alive and silence timeout."""
         while True:
             try:
                 now = time.monotonic()
-                if self.active:
+                if self.active and not self.paused:
                     interval = KEEPALIVE_SECONDS if self.connected else RETRY_SECONDS
                     if now - self._last_keepalive >= interval:
                         self._last_keepalive = now
@@ -191,7 +211,7 @@ class CrestronClient:
                     self._set_connected(False)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - never let the loop die
+            except Exception:
                 _LOGGER.exception("Session loop error, continuing")
             await asyncio.sleep(LOOP_TICK_SECONDS)
 
@@ -205,6 +225,7 @@ class CrestronClient:
             raise ConnectionError("Crestron client is not started")
         self._tx.sendto(packet, (self.host, self.port))   # unconnected socket: accept replies from any port
         self.frames_tx += 1
+        self.history.append((time.monotonic(), "tx", packet.hex()))
 
     async def _send_payload(self, payload: bytes, confirm: bool = False) -> None:
         """Send one data frame. confirm=True: send it once more if the processor does not ack it in time."""
@@ -229,7 +250,7 @@ class CrestronClient:
     def _resend(self, seq: int, packet: bytes) -> None:
         """No ack for a light command: send the same frame once more (a level command is safe to repeat)."""
         self._unacked.pop(seq, None)
-        if not self.connected:
+        if not self.connected or self.paused:
             return
         _LOGGER.debug("No ack for seq %d, sending it once more", seq)
         try:
@@ -247,6 +268,8 @@ class CrestronClient:
         """Set an analog join (0 = off, 65535 = full). Raises ConnectionError when the link is down."""
         if not self.connected:
             raise ConnectionError("Crestron link is down")
+        if self.paused:
+            raise ConnectionError("paused while refreshing from the processor")
         await self._send_payload(protocol.analog_payload(join, level), confirm=True)
 
     # ---------- receiving ----------
@@ -254,6 +277,10 @@ class CrestronClient:
         """Process one datagram. Only the processor's IP is trusted."""
         if addr[0] != self.host:
             return
+        if self.paused:
+            self.ignored_while_paused += 1         # no ack either: the processor must see us as gone
+            return
+        self.history.append((time.monotonic(), "rx", data.hex()))
         frames = protocol.parse_datagram(data)
         if not frames:
             return
@@ -290,7 +317,7 @@ class CrestronClient:
                 for listener in list(self._digital_listeners):
                     try:
                         listener(event.join, event.level)
-                    except Exception:  # noqa: BLE001 - a bad listener must never stop the session
+                    except Exception:  # a bad listener must never stop the session
                         _LOGGER.exception("Digital listener failed")
         elif event.kind == "name":
             self.labels[event.join] = event.text
@@ -298,6 +325,7 @@ class CrestronClient:
             self.room_names[event.name_id] = event.text
         elif event.kind == "hello":
             _LOGGER.info("Crestron hello received, session established")
+            self.hellos += 1
             self._schedule_dump_complete()
 
     def _schedule_dump_complete(self) -> None:

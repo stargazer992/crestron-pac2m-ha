@@ -1,14 +1,14 @@
 """Shared fixtures: custom integration loading + a simulated PAC2M (console + UDP) for end-to-end tests."""
 import asyncio
 import pathlib
-import re
 import sys
+import time
 
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from custom_components.crestron_pac2m import protocol  # noqa: E402
+from custom_components.crestron_pac2m import protocol
 
 pytest_plugins = "pytest_homeassistant_custom_component"
 
@@ -41,6 +41,8 @@ class FakeProcessor:
         self.levels = {0x127: 0x0000, 0x124: 0xFFFF}
         self.names = {0x124: "WRONG NAME", 0x127: "Sconces 2"}   # join -> label sent in the dump
         self.rooms = {0x124: "Theater", 0x127: "Kitchen"}   # join -> room sent in the dump (0x127 is deliberately wrong)
+        self.peer_timeout = None           # seconds of silence after which the peer counts as gone (new session: hello + dump)
+        self._last_peer_rx = None
         self.seq = 0
         self.client_addr = ("127.0.0.1", PORTS["listen"])
         self._servers = []
@@ -137,6 +139,11 @@ class FakeProcessor:
     def datagram_received(self, data, addr):
         if self.table_ip != HA_IP or self.down or not self.hello_enabled:
             return                             # only the peer in the IP table is answered
+        now = time.monotonic()
+        if self.peer_timeout is not None and self._last_peer_rx is not None and now - self._last_peer_rx > self.peer_timeout:
+            self.keepalive_seen = False
+            self.send_data(bytes([2, 3, 0]))   # hello toward the returning peer
+        self._last_peer_rx = now
         for frame in protocol.parse_datagram(data):
             self.udp_frames += 1
             if frame.kind != "data":
