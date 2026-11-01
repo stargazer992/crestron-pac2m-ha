@@ -58,12 +58,15 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | IP table edits + reboot + Control4 reconnect | Verified (rollback test, Oct 2026) |
 | All other joins (33 lights) | Derived from the Control4 project; spot-check after cutover |
 | Family Room fan (0x106) | Works on/off from Home Assistant (never worked under Control4); speed control untested |
-| Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a notification (`crestron_pac2m_labels`) and shows on the Link sensor (`label_mismatches`, `label_check`). After a Home Assistant restart there is no name dump, so `label_check` is `no_dump` (nothing compared) |
+| Label check | After every link-up the processor's name dump is compared with the table; a mismatch raises a Repairs issue (Settings > System > Repairs) and a phone message and shows on the Link sensor (`label_mismatches`, `label_check`). After a Home Assistant restart there is no name dump, so `label_check` is `no_dump` (nothing compared) |
 | Lost packets | A light command with no ack within 1 s is sent once more; a frame the processor retransmits is acked but handled once (Link sensor: `commands_resent`, `duplicates_ignored`). Simulator only |
 | Refresh from processor | Service `crestron_pac2m.refresh_from_processor` (stand-alone, dry run by default): Home Assistant goes silent for `pause_seconds` (default 180) so the processor drops the session, then reconnects; a new session brings a hello + full state dump, so light levels changed while HA was down become current. Link sensor attribute `refresh`: `paused`, `waiting`, `dump_received` or `no_dump`. Simulator only: how long the real processor needs is unknown |
-| Keypads | Event entity **Digital join** fires `high`/`low` (attributes `join`, `join_hex`) for every digital join; joins listed in `KEYPAD_BUTTONS` (const.py) get their own event entity with `press`/`release`. No real keypad press captured yet |
+| Keypads | Event entity **Digital join** fires `high`/`low` (attributes `join`, `join_hex`) for every digital join. Configure > *Learn a keypad button* waits for the next press and asks for a name; that button gets its own event entity with `press`/`release` (no reload, no code change). Configure > *Remove keypad buttons* removes them. No real keypad press captured yet |
+| Refresh after a Home Assistant restart | Off by default (Configure > Settings). When ticked: in stand-alone mode, if the link comes up without a hello (HA restarted, the processor kept the session), *Refresh from processor* runs once after 30 s. Simulator only |
+| Areas | At setup each light without an area goes into the Home Assistant area named like its room (name or alias, any case). Done once per light: areas you change or clear later are never touched. Create the areas first; rooms without an area are listed in the diagnostics |
+| Light table file | Optional `crestron_pac2m_lights.yaml` in the Home Assistant config folder replaces the built-in table (see [docs/crestron_pac2m_lights.example.yaml](docs/crestron_pac2m_lights.example.yaml)). A wrong file stops the integration from loading with the reason shown; no file = built-in table |
 | Diagnostics | Integration menu > Download diagnostics: link state, counters, levels, labels, last 100 frames and the IP table entry (read only) |
-| Home Assistant IP changed | Stand-alone with the link down for 60 s: the IP table is read (read only) and a notification (`crestron_pac2m_address`) says if it points at another address. Simulator only |
+| Home Assistant IP changed | Stand-alone with the link down for 60 s: the IP table is read (read only) and a Repairs issue says if it points at another address; its *Fix* button runs Go stand-alone to re-point the processor (reboots it). Simulator only |
 | Integration inside Home Assistant 2026.10 | Automated tests against a simulated processor + console (`tests/`) |
 | Integration against the real processor | Verified: cutover done 2026-10-16, all 40 lights respond (v1.5.0) |
 | `device_id` for the new IP table entry | Left to the default (the Control4 entry also has none) |
@@ -80,7 +83,9 @@ custom_components/crestron_pac2m/   the integration
   protocol.py   frame encode/decode (no HA imports)      client.py     UDP session, keep-alive, availability (no HA imports)
   console.py    telnet console client (no HA imports)    switcher.py   IP table re-pointing with reboot + failback (no HA imports)
   adopt.py      entity-id takeover / release             operations.py the two switch operations
+  lights.py     light table (built-in or crestron_pac2m_lights.yaml) repairs.py    Repairs fix for the address issue
   light.py binary_sensor.py event.py diagnostics.py discovery.py config_flow.py __init__.py const.py (every tunable value is in const.py)
+  brand/        integration icon
 tests/          pytest (real HA core + fake processor) and standalone_client_check.py
 tools/          reference scripts used during discovery (probe4, theater restore, rollback, pcap parser, join JSON)
 docs/           lessons learned, protocol, runbook, join map

@@ -53,11 +53,13 @@ def notify_service_for(entry: ConfigEntry) -> str:
 
 
 async def async_notify(
-    hass: HomeAssistant, entry: ConfigEntry, title: str, text: str, short: str, notification_id: str = NOTIFICATION_ID
+    hass: HomeAssistant, entry: ConfigEntry, title: str, text: str, short: str, notification_id: str = NOTIFICATION_ID,
+    persistent: bool = True,
 ) -> None:
-    """Persistent notification plus the phone (project rule). Never raises."""
+    """Persistent notification (unless a Repairs issue shows it) plus the phone (project rule). Never raises."""
     try:
-        persistent_notification.async_create(hass, text, title=title, notification_id=notification_id)
+        if persistent:
+            persistent_notification.async_create(hass, text, title=title, notification_id=notification_id)
         service = notify_service_for(entry)
         if service and hass.services.has_service("notify", service):
             await hass.services.async_call("notify", service, {"title": title, "message": short})
@@ -104,7 +106,7 @@ async def async_go_standalone(hass: HomeAssistant, entry: ConfigEntry, dry_run: 
     result = await _repoint(entry, host, ha_ip, dry_run, ready, failback)
     result.steps.insert(0, f"Home Assistant address used: {ha_ip}")
     if result.ok:
-        messages, _ = await async_adopt(hass, dry_run)
+        messages, _ = await async_adopt(hass, dry_run, entry.runtime_data.lights)
         result.steps.append("--- entity ids ---")
         result.steps.extend(messages)
         if not dry_run:
@@ -130,7 +132,7 @@ async def async_return_to_control4(hass: HomeAssistant, entry: ConfigEntry, dry_
     result = await _repoint(entry, host, c4_ip, dry_run, None, failback)
     result.steps.insert(0, f"Control4 address used: {c4_ip}")
     if result.ok:
-        messages, needs_reload = await async_release(hass, dry_run)
+        messages, needs_reload = await async_release(hass, dry_run, entry.runtime_data.lights)
         result.steps.append("--- entity ids ---")
         result.steps.extend(messages)
         if not dry_run:

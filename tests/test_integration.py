@@ -8,6 +8,7 @@ from homeassistant.components.persistent_notification import (
 from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import label_registry as lr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -16,6 +17,8 @@ from custom_components.crestron_pac2m.const import (
     CONF_HOST,
     CONF_MODE,
     DOMAIN,
+    ISSUE_ADDRESS,
+    ISSUE_LABELS,
     MODE_CONTROL4,
     MODE_STANDALONE,
 )
@@ -186,19 +189,20 @@ async def test_config_flow_creates_passive_entry(hass, processor):
 
 async def test_label_check_flags_wrong_mapping(hass, processor):
     """The processor says join 0x124 is 'WRONG NAME' (table expects 'Downlights'); 0x127 'Sconces 2' matches."""
-    entry, _ = await setup_entry(hass)
-    with patch("custom_components.crestron_pac2m.operations.persistent_notification.async_create") as notify, \
-         patch("custom_components.crestron_pac2m.operations.persistent_notification.async_dismiss"):
-        await async_go_standalone(hass, entry, False)
-        await asyncio.sleep(1.0)
-        report = entry.runtime_data.label_report
-        assert report is not None and [m[0] for m in report.mismatched] == [0x124, 0x127]
-        assert report.mismatched[0][2:] == ("Downlights in Theater", "WRONG NAME in Theater")   # wrong light label
-        assert report.mismatched[1][2:] == ("Sconces 2 in Theater", "Sconces 2 in Kitchen")       # wrong room
-        texts = [c.args[1] for c in notify.call_args_list if "MISMATCH" in str(c.args)]
-        assert texts and "0x0124" in texts[0] and "WRONG NAME" in texts[0]
-        await asyncio.sleep(2.0)                           # regression: it used to re-run endlessly (a notification every few seconds)
-        assert len([c for c in notify.call_args_list if "MISMATCH" in str(c.args)]) == 1
+    phone = []
+    hass.services.async_register("notify", "test_phone", lambda call: phone.append(call.data))
+    entry, _ = await setup_entry(hass, notify_service="test_phone")
+    await async_go_standalone(hass, entry, False)
+    await asyncio.sleep(1.0)
+    report = entry.runtime_data.label_report
+    assert report is not None and [m[0] for m in report.mismatched] == [0x124, 0x127]
+    assert report.mismatched[0][2:] == ("Downlights in Theater", "WRONG NAME in Theater")   # wrong light label
+    assert report.mismatched[1][2:] == ("Sconces 2 in Theater", "Sconces 2 in Kitchen")       # wrong room
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_LABELS)
+    assert issue is not None and not issue.is_fixable
+    assert "0x0124" in issue.translation_placeholders["summary"] and "WRONG NAME" in issue.translation_placeholders["summary"]
+    await asyncio.sleep(2.0)                           # regression: it used to re-run endlessly (a message every few seconds)
+    assert len([m for m in phone if "mapped wrongly" in m["message"]]) == 1
     link = hass.states.get("binary_sensor.crestron_pac2m_link").attributes
     assert link["label_mismatches"] == 2 and link["label_check"] == "mismatch"
 
@@ -324,22 +328,23 @@ async def test_warns_when_processor_points_at_an_old_home_assistant_address(hass
     phone = []
     hass.services.async_register("notify", "test_phone", lambda call: phone.append(call.data))
     await setup_entry(hass, mode=MODE_STANDALONE, notify_service="notify.test_phone")
-    notifications = _async_get_or_create_notifications(hass)
+    issues = ir.async_get(hass)
     for _ in range(60):
-        if "crestron_pac2m_address" in notifications:
+        if issues.async_get_issue(DOMAIN, ISSUE_ADDRESS):
             break
         await asyncio.sleep(0.05)
-    text = notifications["crestron_pac2m_address"]["message"]
-    assert "10.9.9.9" in text and HA_IP in text
+    issue = issues.async_get_issue(DOMAIN, ISSUE_ADDRESS)
+    assert issue is not None and issue.is_fixable
+    assert issue.translation_placeholders == {"cip_id": "6", "table_ip": "10.9.9.9", "ha_ip": HA_IP}
     await hass.async_block_till_done()
-    assert phone and "10.9.9.9" in phone[0]["message"]
+    assert phone and "10.9.9.9" in phone[0]["message"] and "Repairs" in phone[0]["message"]
     assert processor.table_ip == "10.9.9.9" and processor.reboots == 0     # read only
 
 
 async def test_no_address_warning_when_link_is_up(hass, processor):
     await _restarted_standalone(hass, processor)
     await asyncio.sleep(0.8)
-    assert "crestron_pac2m_address" not in _async_get_or_create_notifications(hass)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ADDRESS) is None
     assert processor.commands == []                     # the console was never opened
 
 
@@ -353,6 +358,7 @@ async def test_settings_validate_and_clear(hass, processor):
     assert flow["type"].value == "create_entry"
     assert entry.options[CONF_HA_HOST] == "10.1.1.120" and entry.options["control4_host"] == ""
     assert entry.options["notify_service"] == "my_phone" and entry.options[CONF_MODE] == MODE_CONTROL4
+    assert entry.options["refresh_after_restart"] is False                 # off unless ticked
 
 
 async def test_config_flow_finds_the_processor(hass, processor):
@@ -451,8 +457,8 @@ async def test_refresh_refused_in_control4_mode(hass, processor):
 
 
 async def test_digital_joins_and_keypad_buttons_as_event_entities(hass, processor):
-    from custom_components.crestron_pac2m import event, protocol
-    with patch.dict(event.KEYPAD_BUTTONS, {0x43: "Theater button 1"}):
+    from custom_components.crestron_pac2m import lights, protocol
+    with patch.dict(lights.KEYPAD_BUTTONS, {0x43: "Theater button 1"}):
         await _restarted_standalone(hass, processor)
         processor.send_data(protocol.digital_payload(0x0042, True))
         assert await wait_state(hass, "event.crestron_pac2m_digital_join", lambda s: s.attributes.get("event_type") == "high" and s.attributes.get("join") == 0x42)
@@ -487,3 +493,170 @@ async def test_diagnostics(hass, processor):
     assert diag["ip_table"] == {"status": "ONLINE", "port": "41794", "ip": HA_IP}
     assert {f["dir"] for f in diag["recent_frames"]} == {"rx", "tx"}
     assert diag["label_check"]["status"] in ("pending", "no_dump")
+
+
+async def test_repair_fix_repoints_the_processor(hass, processor):
+    """The Repairs fix for the address issue runs Go stand-alone; the issue goes away once the link is up."""
+    from homeassistant.components.repairs import repairs_flow_manager
+    from homeassistant.setup import async_setup_component
+    assert await async_setup_component(hass, "repairs", {})
+    processor.table_ip = "10.9.9.9"
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    issues = ir.async_get(hass)
+    for _ in range(60):
+        if issues.async_get_issue(DOMAIN, ISSUE_ADDRESS):
+            break
+        await asyncio.sleep(0.05)
+    manager = repairs_flow_manager(hass)
+    flow = await manager.async_init(DOMAIN, data={"issue_id": ISSUE_ADDRESS})
+    assert flow["type"].value == "form" and flow["description_placeholders"]["table_ip"] == "10.9.9.9"
+    assert processor.reboots == 0, "nothing is changed before the fix is confirmed"
+    flow = await manager.async_configure(flow["flow_id"], {})
+    assert flow["type"].value == "progress"
+    await hass.async_block_till_done()
+    flow = await manager.async_configure(flow["flow_id"])
+    assert flow["type"].value == "create_entry"
+    assert processor.table_ip == HA_IP and processor.reboots == 1
+    assert issues.async_get_issue(DOMAIN, ISSUE_ADDRESS) is None
+
+
+async def _options_step(hass, entry, step, user_input=None):
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": step})
+
+
+async def test_learn_and_remove_a_keypad_button(hass, processor):
+    from custom_components.crestron_pac2m import protocol
+    entry = await _restarted_standalone(hass, processor)
+    flow = await _options_step(hass, entry, "learn")
+    assert flow["type"].value == "progress"
+    processor.send_data(protocol.digital_payload(0x0043, True))
+    await hass.async_block_till_done()
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"])
+    assert flow["type"].value == "form" and flow["step_id"] == "learn_name" and flow["description_placeholders"]["join"] == "0x0043"
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": " "})
+    assert flow["errors"] == {"name": "name_required"}
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": "Theater button 1"})
+    assert flow["type"].value == "create_entry" and entry.options["keypad_buttons"] == {"0x0043": "Theater button 1"}
+    assert entry.options[CONF_MODE] == MODE_STANDALONE
+    await hass.async_block_till_done()
+    button = "event.crestron_pac2m_theater_button_1"
+    assert hass.states.get(button) is not None
+    assert entry.runtime_data.client.connected, "learning a button does not reload the integration"
+    catch_all = hass.states.get("event.crestron_pac2m_digital_join").state
+    processor.send_data(protocol.digital_payload(0x0043, True))
+    assert await wait_state(hass, button, lambda s: s.attributes.get("event_type") == "press")
+    assert hass.states.get("event.crestron_pac2m_digital_join").state == catch_all, "a named button stays off the catch-all"
+
+    flow = await _options_step(hass, entry, "buttons")
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"remove": ["0x0043"]})
+    assert flow["type"].value == "create_entry" and entry.options["keypad_buttons"] == {}
+    await hass.async_block_till_done()
+    assert hass.states.get(button) is None and er.async_get(hass).async_get(button) is None
+    processor.send_data(protocol.digital_payload(0x0043, False))
+    assert await wait_state(hass, "event.crestron_pac2m_digital_join", lambda s: s.attributes.get("join") == 0x43)
+    flow = await _options_step(hass, entry, "buttons")
+    assert flow["type"].value == "abort" and flow["reason"] == "no_buttons"
+
+
+async def test_learn_needs_the_link(hass, processor):
+    entry, _ = await setup_entry(hass)                      # Control4 mode: passive, no link
+    flow = await _options_step(hass, entry, "learn")
+    assert flow["type"].value == "abort" and flow["reason"] == "not_connected"
+
+
+async def test_learn_times_out(hass, processor):
+    from custom_components.crestron_pac2m import config_flow
+    with patch.object(config_flow, "LEARN_TIMEOUT_SECONDS", 0.3):
+        entry = await _restarted_standalone(hass, processor)
+        flow = await _options_step(hass, entry, "learn")
+        await asyncio.sleep(0.5)
+        await hass.async_block_till_done()
+        flow = await hass.config_entries.options.async_configure(flow["flow_id"])
+    assert flow["type"].value == "abort" and flow["reason"] == "learn_timeout"
+    assert "keypad_buttons" not in entry.options
+
+
+async def test_lights_go_into_areas_named_like_their_room(hass, processor):
+    areas = ar.async_get(hass)
+    theater = areas.async_create("Theater")
+    kitchen = areas.async_create("Cooking", aliases={"kitchen"})
+    registry = er.async_get(hass)
+    entry, _ = await setup_entry(hass)
+    downlights = "light.crestron_pac2m_theater_downlights"
+    assert registry.async_get(downlights).area_id == theater.id
+    kitchen_lights = [e for e in er.async_entries_for_config_entry(registry, entry.entry_id) if e.area_id == kitchen.id]
+    assert kitchen_lights, "matched by alias, case-insensitive"
+    assert 0x124 in entry.data["area_joins"]
+    assert "Theater" not in entry.runtime_data.unmatched_rooms
+    # an area the user cleared or changed is never touched again
+    registry.async_update_entity(downlights, area_id=None)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get(downlights).area_id is None
+
+
+async def test_lights_file_replaces_the_built_in_table(hass, processor, tmp_path):
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "crestron_pac2m_lights.yaml").write_text(
+        "- {join: 0x124, entity_id: light.theater_cans, kind: dimmer, room: Theater, label: Downlights}\n"
+        "- {join: 0x127, entity_id: light.theater_wall, kind: relay, room: Theater, label: Sconces 2}\n"
+    )
+    entry, _ = await setup_entry(hass)
+    lights = [e for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) if e.domain == "light"]
+    assert len(lights) == 2
+    assert entry.runtime_data.lights_source == "crestron_pac2m_lights.yaml"
+    assert entry.runtime_data.lights[0] == (0x124, "light.theater_cans", "Dimmer", "Theater", "Downlights")
+
+
+async def test_a_bad_lights_file_stops_setup(hass, processor, tmp_path):
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "crestron_pac2m_lights.yaml").write_text(
+        "- {join: 0x124, entity_id: light.a, kind: dimmer, room: Theater, label: A}\n"
+        "- {join: 0x124, entity_id: light.b, kind: dimmer, room: Theater, label: B}\n"
+    )
+    entry, _ = await setup_entry(hass)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert "duplicate join" in entry.reason
+    assert processor.udp_frames == 0
+
+
+def test_lights_file_rows_are_checked():
+    import pytest
+    import voluptuous as vol
+
+    from custom_components.crestron_pac2m.lights import parse_lights
+    assert parse_lights([{"join": "0x124", "entity_id": "light.x", "kind": "relay", "room": "R", "label": "L"}])[0][0] == 0x124
+    for bad in ([], {"a": 1}, [{"join": 0x124, "entity_id": "switch.x", "kind": "relay", "room": "R", "label": "L"}],
+                [{"join": 0x124, "entity_id": "light.x", "kind": "fan", "room": "R", "label": "L"}]):
+        with pytest.raises(vol.Invalid):
+            parse_lights(bad)
+
+
+async def test_no_refresh_after_restart_by_default(hass, processor):
+    from custom_components import crestron_pac2m
+    with patch.object(crestron_pac2m, "REFRESH_AFTER_RESTART_DELAY_SECONDS", 0.3):
+        entry = await _restarted_standalone(hass, processor)
+        await asyncio.sleep(0.6)
+    assert entry.runtime_data.refresh_status == "idle" and not entry.runtime_data.client.paused
+
+
+async def test_refresh_after_restart_when_ticked(hass, processor):
+    from custom_components import crestron_pac2m
+    with patch.object(crestron_pac2m, "REFRESH_AFTER_RESTART_DELAY_SECONDS", 0.3), \
+         patch.object(crestron_pac2m, "REFRESH_PAUSE_SECONDS", 1):
+        processor.peer_timeout = 0.5
+        entry = await _restarted_standalone(hass, processor, refresh_after_restart=True)
+        assert await wait_state(hass, "binary_sensor.crestron_pac2m_link", lambda s: s.attributes["refresh"] == "dump_received", timeout=8)
+    assert not entry.runtime_data.client.paused
+
+
+def test_example_lights_file_is_the_built_in_table():
+    from pathlib import Path
+
+    from homeassistant.util.yaml import load_yaml
+
+    from custom_components.crestron_pac2m.const import LIGHTS
+    from custom_components.crestron_pac2m.lights import parse_lights
+    example = Path(__file__).parent.parent / "docs" / "crestron_pac2m_lights.example.yaml"
+    assert parse_lights(load_yaml(str(example))) == LIGHTS

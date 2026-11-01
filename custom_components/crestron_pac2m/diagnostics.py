@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from . import CrestronConfigEntry
 from .console import CrestronConsole
+from .lights import keypad_buttons
 
 CONSOLE_READ_TIMEOUT = 10
 
@@ -53,6 +54,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Crestro
             "mismatched": None if report is None else [list(m) for m in report.mismatched],
             "missing": None if report is None else [list(m) for m in report.missing],
         },
+        "light_table": {"source": data.lights_source, "lights": len(data.lights), "rooms_without_area": list(data.unmatched_rooms)},
+        "keypad_buttons": {f"0x{join:04X}": name for join, name in sorted(keypad_buttons(entry).items())},
         "levels": {f"0x{join:04X}": level for join, level in sorted(client.levels.items())},
         "labels": {f"0x{join:04X}": text for join, text in sorted(client.labels.items())},
         "rooms": {str(name_id): text for name_id, text in sorted(client.room_names.items())},

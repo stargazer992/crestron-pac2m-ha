@@ -14,7 +14,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from . import CrestronConfigEntry
 from .adopt import unique_id_for
 from .client import CrestronClient
-from .const import DOMAIN, KIND_DIMMER, LIGHTS, TURN_ON_RESTORES_LAST_LEVEL
+from .const import DOMAIN, KIND_DIMMER, TURN_ON_RESTORES_LAST_LEVEL
 from .protocol import LEVEL_FULL, brightness_to_level, level_to_brightness
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,10 +22,10 @@ PARALLEL_UPDATES = 0                    # push based; commands are serialised in
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: CrestronConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
-    """Create all 40 lights."""
+    """One entity per row of the light table."""
     client = entry.runtime_data.client
     async_add_entities(
-        [CrestronLight(client, entry, join, legacy_id, kind, room, label) for join, legacy_id, kind, room, label in LIGHTS]
+        [CrestronLight(client, entry, join, legacy_id, kind, room, label) for join, legacy_id, kind, room, label in entry.runtime_data.lights]
     )
 
 

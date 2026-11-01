@@ -200,3 +200,10 @@ Every digital join the processor sends (after the state dump has settled; the ke
 - GitHub Actions runs Ruff, the tests, hassfest and the HACS check on every push/PR and weekly.
 - The Family Room fan relay stays a light entity: changing it to a fan would change its entity id.
 
+## 20. Learned buttons, Repairs, areas, light table file (v1.10.0, simulator only)
+- Keypad buttons are learned under Configure > *Learn a keypad button* (next digital join that goes high and has no name, 60 s) and stored in the entry options as `keypad_buttons` (`{"0x0043": "name"}`); `KEYPAD_BUTTONS` in const.py still works and the options win. Entities are added/removed without a reload, so the link is not interrupted. A light's own feedback joins could be learned by mistake if a light changes during the wait.
+- The address and label warnings are Repairs issues (`address_changed`, `label_mismatch`) instead of persistent notifications; the phone message stays. They clear themselves (address: when the link comes up; labels: when they match). The address fix runs Go stand-alone, only after the user confirms.
+- Areas from rooms: matched by area name or alias, once per light (`area_joins` in the entry data), never over an area already set. Adoption still copies the Control4 entity's area over it.
+- `crestron_pac2m_lights.yaml` replaces `LIGHTS` completely (no merging). It is validated (join range, `light.` entity ids, kind, duplicates); a bad file is a setup error rather than a silent fallback, so a typo can't make lights disappear.
+- Refresh after a Home Assistant restart is opt-in (`refresh_after_restart`), because refresh itself is unverified on the real processor. The trigger is "link up, no hello received, 30 s later".
+

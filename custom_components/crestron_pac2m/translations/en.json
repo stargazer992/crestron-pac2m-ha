@@ -33,7 +33,9 @@
         "menu_options": {
           "standalone": "Go stand-alone (processor points to Home Assistant)",
           "control4": "Return to Control4 (processor points to Control4, integration disables itself)",
-          "settings": "Settings (address overrides, phone notification)"
+          "learn": "Learn a keypad button",
+          "buttons": "Remove keypad buttons",
+          "settings": "Settings (address overrides, phone notification, refresh after restart)"
         }
       },
       "standalone": {
@@ -52,22 +54,42 @@
       },
       "settings": {
         "title": "Settings",
-        "description": "The two addresses are only needed if they cannot be found automatically; leave them empty for automatic. The phone notification service gets a short message for every switch and warning (empty = persistent notification only).",
+        "description": "The two addresses are only needed if they cannot be found automatically; leave them empty for automatic. The phone notification service gets a short message for every switch and warning (empty = persistent notification only).\n\nRefresh after a Home Assistant restart (experimental, untested on a real processor): in stand-alone mode, when Home Assistant restarts while the processor keeps the session, run Refresh from processor to get the real light levels. Home Assistant cannot control the lights for about 3 minutes meanwhile; wall keypads keep working. Takes effect at the next start.",
         "data": {
           "control4_host": "Control4 server IP",
           "ha_host": "Home Assistant IP",
-          "notify_service": "Phone notification service (the part after notify.)"
+          "notify_service": "Phone notification service (the part after notify.)",
+          "refresh_after_restart": "Refresh from processor after a Home Assistant restart"
+        }
+      },
+      "learn_name": {
+        "title": "Name the keypad button",
+        "description": "Digital join {join} was pressed. It gets its own event entity (press and release) and no longer shows up on the Digital join entity.",
+        "data": {
+          "name": "Button name"
+        }
+      },
+      "buttons": {
+        "title": "Remove keypad buttons",
+        "description": "Ticked buttons lose their event entity; their presses go back to the Digital join entity.",
+        "data": {
+          "remove": "Buttons to remove"
         }
       }
     },
     "error": {
-      "invalid_host": "Enter a valid IPv4 address"
+      "invalid_host": "Enter a valid IPv4 address",
+      "name_required": "Enter a name"
     },
     "progress": {
-      "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window."
+      "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes; you can close this window.",
+      "learning": "Press the keypad button now (waiting {seconds} s). Don't change lights from Home Assistant meanwhile."
     },
     "abort": {
-      "result": "{result}"
+      "result": "{result}",
+      "not_connected": "The processor link is down (or the integration is in Control4 mode); keypad presses can only be learned while the link is up.",
+      "learn_timeout": "No new keypad press within {seconds} s. Buttons that already have a name are ignored.",
+      "no_buttons": "No learned keypad buttons yet."
     }
   },
   "services": {
@@ -124,6 +146,30 @@
           "description": "How long Home Assistant stays silent. The lights cannot be controlled from Home Assistant meanwhile; wall keypads keep working."
         }
       }
+    }
+  },
+  "issues": {
+    "address_changed": {
+      "title": "Crestron processor points at an old Home Assistant address",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Re-point the Crestron processor",
+            "description": "The processor's IP table (entry {cip_id}) points at {table_ip}, but Home Assistant is now {ha_ip}, so the lights are unavailable.\n\nSubmit runs Go stand-alone: it points the processor at {ha_ip} and reboots it (about 2-4 minutes; lights keep their levels and wall keypads keep working). If Home Assistant never comes online the change is undone. To avoid this in future, give Home Assistant a fixed address in your router."
+          }
+        },
+        "progress": {
+          "switching": "Re-pointing the Crestron processor and rebooting it. This takes a few minutes."
+        },
+        "abort": {
+          "not_loaded": "The Crestron PAC2M integration is not loaded.",
+          "failed": "{result}"
+        }
+      }
+    },
+    "label_mismatch": {
+      "title": "Crestron light labels do not match the light table",
+      "description": "{summary}\n\nThe processor's names for these joins differ from the light table, so a light entity may control a different light. Check the light table (or crestron_pac2m_lights.yaml). This goes away by itself once the labels match."
     }
   }
 }
