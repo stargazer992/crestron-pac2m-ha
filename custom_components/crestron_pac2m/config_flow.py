@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
+from homeassistant.helpers import config_validation as cv
 
 from . import discovery
 from .const import (
@@ -21,13 +22,18 @@ from .const import (
     CONF_CONTROL4_HOST,
     CONF_HA_HOST,
     CONF_HOST,
+    CONF_KEYPAD_BUTTONS,
     CONF_MODE,
     CONF_NOTIFY_SERVICE,
+    CONF_REFRESH_AFTER_RESTART,
     DEFAULT_HOST,
     DEFAULT_MODE,
     DOMAIN,
+    KEEPALIVE_DIGITAL_JOIN,
+    LEARN_TIMEOUT_SECONDS,
     NOTIFY_SERVICE,
 )
+from .lights import keypad_buttons
 from .operations import (
     async_go_standalone,
     async_return_to_control4,
@@ -116,16 +122,17 @@ def _found_text(found: dict[str, str]) -> str:
 
 
 class CrestronOptionsFlow(OptionsFlow):
-    """Menu: go stand-alone / return to Control4 / settings."""
+    """Menu: go stand-alone / return to Control4 / learn or remove keypad buttons / settings."""
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._action = ""
+        self._learn_task: asyncio.Task | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["standalone", "control4", "settings"],
+            menu_options=["standalone", "control4", "learn", "buttons", "settings"],
             description_placeholders={"mode": self.config_entry.options.get(CONF_MODE, DEFAULT_MODE)},
         )
 
@@ -157,6 +164,74 @@ class CrestronOptionsFlow(OptionsFlow):
         text = "nothing happened" if result is None else result.message + "\n\n" + "\n".join(result.steps)
         return self.async_abort(reason="result", description_placeholders={"result": text})
 
+    # ---- keypad buttons ----
+    async def _wait_for_press(self) -> int | None:
+        """The next digital join that goes high and has no name yet (None after LEARN_TIMEOUT_SECONDS)."""
+        client = self.config_entry.runtime_data.client
+        known = keypad_buttons(self.config_entry)
+        pressed: asyncio.Future[int] = self.hass.loop.create_future()
+
+        @callback
+        def _digital(join: int, level: int) -> None:
+            if level and join != KEEPALIVE_DIGITAL_JOIN and join not in known and not pressed.done():
+                pressed.set_result(join)
+
+        remove = client.add_digital_listener(_digital)
+        try:
+            return await asyncio.wait_for(pressed, LEARN_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return None
+        finally:
+            remove()
+
+    async def async_step_learn(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if self._learn_task is None:
+            if not self.config_entry.runtime_data.client.connected:
+                return self.async_abort(reason="not_connected")
+            self._learn_task = self.hass.async_create_task(self._wait_for_press())
+        if not self._learn_task.done():
+            return self.async_show_progress(
+                step_id="learn",
+                progress_action="learning",
+                progress_task=self._learn_task,
+                description_placeholders={"seconds": str(LEARN_TIMEOUT_SECONDS)},
+            )
+        return self.async_show_progress_done(next_step_id="learn_name")
+
+    async def async_step_learn_name(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        join = self._learn_task.result() if self._learn_task is not None else None
+        if join is None:
+            return self.async_abort(reason="learn_timeout", description_placeholders={"seconds": str(LEARN_TIMEOUT_SECONDS)})
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = str(user_input.get("name", "")).strip()
+            if name:
+                options = self.config_entry.options
+                buttons = {**options.get(CONF_KEYPAD_BUTTONS, {}), f"0x{join:04x}": name}
+                return self.async_create_entry(title="", data={**options, CONF_KEYPAD_BUTTONS: buttons})
+            errors["name"] = "name_required"
+        return self.async_show_form(
+            step_id="learn_name",
+            data_schema=vol.Schema({vol.Required("name", description={"suggested_value": f"Keypad button 0x{join:04X}"}): str}),
+            description_placeholders={"join": f"0x{join:04X}"},
+            errors=errors,
+        )
+
+    async def async_step_buttons(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        options = self.config_entry.options
+        buttons: dict[str, str] = dict(options.get(CONF_KEYPAD_BUTTONS, {}))
+        if not buttons:
+            return self.async_abort(reason="no_buttons")
+        if user_input is not None:
+            remove = set(user_input.get("remove", []))
+            kept = {join: name for join, name in buttons.items() if join not in remove}
+            return self.async_create_entry(title="", data={**options, CONF_KEYPAD_BUTTONS: kept})
+        choices = {join: f"{name} ({join})" for join, name in sorted(buttons.items())}
+        return self.async_show_form(
+            step_id="buttons",
+            data_schema=vol.Schema({vol.Optional("remove", default=[]): cv.multi_select(choices)}),
+        )
+
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         options = self.config_entry.options
@@ -167,17 +242,18 @@ class CrestronOptionsFlow(OptionsFlow):
         }
         if user_input is not None:
             # a cleared field is left out of user_input, so every key is rebuilt (missing = empty)
+            refresh = bool(user_input.get(CONF_REFRESH_AFTER_RESTART, False))
             current = {key: str(user_input.get(key, "")).strip() for key in current}
             current[CONF_NOTIFY_SERVICE] = current[CONF_NOTIFY_SERVICE].removeprefix("notify.")
             for key in (CONF_CONTROL4_HOST, CONF_HA_HOST):
                 if current[key] and not _valid_ip(current[key]):
                     errors[key] = "invalid_host"
             if not errors:
-                return self.async_create_entry(title="", data={**options, **current})
+                return self.async_create_entry(title="", data={**options, **current, CONF_REFRESH_AFTER_RESTART: refresh})
+        schema: dict = {vol.Optional(key, description={"suggested_value": value}): str for key, value in current.items()}
+        schema[vol.Optional(CONF_REFRESH_AFTER_RESTART, default=bool(options.get(CONF_REFRESH_AFTER_RESTART, False)))] = bool
         return self.async_show_form(
             step_id="settings",
-            data_schema=vol.Schema(
-                {vol.Optional(key, description={"suggested_value": value}): str for key, value in current.items()}
-            ),
+            data_schema=vol.Schema(schema),
             errors=errors,
         )

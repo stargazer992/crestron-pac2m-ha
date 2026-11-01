@@ -1,0 +1,45 @@
+# Optional: copy to the Home Assistant config folder as crestron_pac2m_lights.yaml to replace the built-in light table.
+# Restart Home Assistant (or reload the integration) after editing. A wrong file stops the integration from loading,
+# with the reason shown on the integration; delete the file to go back to the built-in table.
+# entity_id is the entity id the light takes over from Control4 (Go stand-alone); label is the processor's own name for the join.
+# This file is the built-in table as of v1.10.0.
+- {join: 0x0101, entity_id: light.dimmer_garage_floods, kind: Dimmer, room: "Exterior", label: "Garage & Portico Flood"}
+- {join: 0x0102, entity_id: light.dimmer_back_floods, kind: Dimmer, room: "Exterior", label: "Back Porch & End House Flood"}
+- {join: 0x0103, entity_id: light.crestron_familyroom_rope, kind: Dimmer, room: "Family", label: "Rope Light"}
+- {join: 0x0104, entity_id: light.interior_familyroom_art_lights, kind: Dimmer, room: "Family", label: "Mini Lights"}
+- {join: 0x0105, entity_id: light.dimmer_downlights, kind: Dimmer, room: "Family", label: "downlight"}
+- {join: 0x0106, entity_id: light.relay_ceiling_fan_family_room, kind: Relay, room: "Family", label: "Fan"}
+- {join: 0x0107, entity_id: light.relay_floor_outlet, kind: Relay, room: "Family", label: "Floor Recp"}
+- {join: 0x0108, entity_id: light.interior_diningroom_chandelier, kind: Dimmer, room: "Family", label: "Kitchen Area"}
+- {join: 0x0109, entity_id: light.interior_foyer_chandelier, kind: Dimmer, room: "Foyer", label: "Chandeliers & stairs"}
+- {join: 0x010A, entity_id: light.interior_foyer_staircase_sconces, kind: Dimmer, room: "Foyer", label: "Foyer Sconce"}
+- {join: 0x010B, entity_id: light.interior_foyer_recessed, kind: Dimmer, room: "Foyer", label: "Hall Can"}
+- {join: 0x010C, entity_id: light.dimmer_pendant, kind: Dimmer, room: "Front Porch", label: "Front Porch Can"}
+- {join: 0x010D, entity_id: light.dimmer_sconces_3, kind: Dimmer, room: "Front Porch", label: "Front Porch Wall"}
+- {join: 0x010E, entity_id: light.interior_gallery_chandeliers, kind: Dimmer, room: "Gallery", label: "Chandeliers (3)"}
+- {join: 0x0112, entity_id: light.interior_kitchen_counter_recessed, kind: Dimmer, room: "Kitchen", label: "Downlights"}
+- {join: 0x0113, entity_id: light.interior_kitchen_chandelier, kind: Dimmer, room: "Kitchen", label: "Chandeliers"}
+- {join: 0x0114, entity_id: light.dimmer_breakfast_chandelier, kind: Dimmer, room: "Kitchen", label: "Nook Chandelier"}
+- {join: 0x0115, entity_id: light.interior_kitchen_dining_recessed, kind: Dimmer, room: "Kitchen", label: "Nook Mini"}
+- {join: 0x0116, entity_id: light.interior_kitchen_top_recessed, kind: Dimmer, room: "Kitchen", label: "Downlights 2"}
+- {join: 0x0117, entity_id: light.dimmer_stove, kind: Dimmer, room: "Kitchen", label: "Kitchen stove"}
+- {join: 0x0118, entity_id: light.interior_diningroom_wallsconces, kind: Dimmer, room: "Living & Dining", label: "Living Wall Sconce"}
+- {join: 0x0119, entity_id: light.interior_livingroom_art_lights, kind: Dimmer, room: "Living & Dining", label: "Living Fireplace"}
+- {join: 0x011A, entity_id: light.interior_livingroom_chandelier, kind: Dimmer, room: "Living & Dining", label: "Living Chandelier"}
+- {join: 0x011B, entity_id: light.interior_kitchen_entry_recessed, kind: Dimmer, room: "Living & Dining", label: "Bnook"}
+- {join: 0x011C, entity_id: light.crestron_livingroom_rope, kind: Relay, room: "Living & Dining", label: "Living Rope Lights"}
+- {join: 0x011D, entity_id: light.interior_diningroom_downlights, kind: Dimmer, room: "Living & Dining", label: "Dining Mini"}
+- {join: 0x011E, entity_id: light.dimmer_sconce, kind: Dimmer, room: "Master Bath", label: "Vanity Sconce"}
+- {join: 0x011F, entity_id: light.relay_sink, kind: Relay, room: "Master Bath", label: "Bath Vanity"}
+- {join: 0x0120, entity_id: light.dimmer_vanity, kind: Dimmer, room: "Master Bath", label: "Dressing Lights"}
+- {join: 0x0121, entity_id: light.dimmer_tub, kind: Dimmer, room: "Master Bath", label: "Tub Can"}
+- {join: 0x0122, entity_id: light.dimmer_chandelier_5, kind: Dimmer, room: "Master Bath", label: "Chandeliers"}
+- {join: 0x0123, entity_id: light.dimmer_shower, kind: Dimmer, room: "Master Bath", label: "Shower"}
+- {join: 0x0124, entity_id: light.dimmer_theater_front_recessed, kind: Dimmer, room: "Theater", label: "Downlights"}
+- {join: 0x0125, entity_id: light.dimmer_rear_downlights, kind: Dimmer, room: "Theater", label: "Downlights 2"}
+- {join: 0x0126, entity_id: light.dimmer_bar_pendants, kind: Dimmer, room: "Theater", label: "Sconces"}
+- {join: 0x0127, entity_id: light.dimmer_sconces, kind: Dimmer, room: "Theater", label: "Sconces 2"}
+- {join: 0x0128, entity_id: light.dimmer_bar_lights, kind: Dimmer, room: "Theater", label: "Mini"}
+- {join: 0x0129, entity_id: light.dimmer_step_lights, kind: Dimmer, room: "Theater", label: "Rope Lights"}
+- {join: 0x012A, entity_id: light.interior_foyer_staircase_basement_recessed, kind: Dimmer, room: "Theater", label: "Stair Lights"}
+- {join: 0x012C, entity_id: light.dimmer_art_lights_dining_room, kind: Dimmer, room: "Living & Dining", label: "Dining Art Lights"}

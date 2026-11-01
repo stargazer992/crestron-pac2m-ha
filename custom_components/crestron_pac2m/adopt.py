@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, LEGACY_PLATFORM, LEGACY_SUFFIX, LIGHTS, RELEASED_SUFFIX
+from .lights import LightRow
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,12 +43,12 @@ def _copy_attributes(hass: HomeAssistant, old: er.RegistryEntry) -> dict:
     return attrs
 
 
-async def async_adopt(hass: HomeAssistant, dry_run: bool) -> tuple[list[str], bool]:
+async def async_adopt(hass: HomeAssistant, dry_run: bool, lights: tuple[LightRow, ...] = LIGHTS) -> tuple[list[str], bool]:
     """Take over the legacy entity ids. Returns (messages, any_change)."""
     registry = er.async_get(hass)
     messages: list[str] = []
     changed = False
-    for join, legacy_id, _kind, _room, _label in LIGHTS:
+    for join, legacy_id, _kind, _room, _label in lights:
         try:
             new_id = registry.async_get_entity_id("light", DOMAIN, unique_id_for(join))
             if new_id is None:
@@ -87,12 +88,12 @@ async def async_adopt(hass: HomeAssistant, dry_run: bool) -> tuple[list[str], bo
     return messages, changed
 
 
-async def async_release(hass: HomeAssistant, dry_run: bool) -> tuple[list[str], bool]:
+async def async_release(hass: HomeAssistant, dry_run: bool, lights: tuple[LightRow, ...] = LIGHTS) -> tuple[list[str], bool]:
     """Give the entity ids back to Control4. Returns (messages, needs_control4_reload)."""
     registry = er.async_get(hass)
     messages: list[str] = []
     needs_reload = False
-    for join, legacy_id, _kind, _room, _label in LIGHTS:
+    for join, legacy_id, _kind, _room, _label in lights:
         try:
             new_id = registry.async_get_entity_id("light", DOMAIN, unique_id_for(join))
             parked_id = legacy_id + LEGACY_SUFFIX

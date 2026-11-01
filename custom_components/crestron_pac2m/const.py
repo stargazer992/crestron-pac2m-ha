@@ -77,6 +77,23 @@ FRAME_HISTORY = 100                     # recent frames kept for Download diagno
 # digital join -> button name. Each entry becomes an event entity (press / release). Fill in after capturing a press under
 # Developer Tools > Events > crestron_pac2m_digital; every other join still shows on the "Digital join" event entity.
 KEYPAD_BUTTONS: dict[int, str] = {}
+CONF_KEYPAD_BUTTONS = "keypad_buttons"  # option: {"0x0043": "Theater button 1"}, filled by Configure > Learn a keypad button
+LEARN_TIMEOUT_SECONDS = 60              # Learn a keypad button: wait this long for a press
+SIGNAL_BUTTONS_UPDATED = "crestron_pac2m_buttons_updated"   # dispatcher signal: add/remove keypad button entities
+
+# ---- Repairs (Settings > System > Repairs) ----
+ISSUE_ADDRESS = "address_changed"       # fixable: runs Go stand-alone again
+ISSUE_LABELS = "label_mismatch"
+
+# ---- light table file (optional; replaces LIGHTS below) ----
+LIGHTS_FILE = "crestron_pac2m_lights.yaml"   # in the Home Assistant config folder
+
+# ---- areas ----
+CONF_AREA_JOINS = "area_joins"          # entry data: joins whose area was already filled in from their room (never again)
+
+# ---- refresh after a Home Assistant restart (opt-in) ----
+CONF_REFRESH_AFTER_RESTART = "refresh_after_restart"
+REFRESH_AFTER_RESTART_DELAY_SECONDS = 30   # link up this long with no hello = HA restarted, the processor kept the session
 
 # ---- notifications ----
 CONF_NOTIFY_SERVICE = "notify_service"   # option: notify.<this> gets a short message too (empty = persistent notification only)
