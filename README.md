@@ -71,6 +71,28 @@ Step-by-step, including manual console commands: [docs/cutover_and_rollback.md](
 | Integration against the real processor | Verified: cutover done 2026-10-16, all 40 lights respond (v1.5.0) |
 | `device_id` for the new IP table entry | Left to the default (the Control4 entry also has none) |
 
+## Version history
+Earlier versions (1.0-1.5) were built and verified on the real processor (cutover 2026-10-16). Versions 1.6.1-1.10.0 were
+built from a code review in October 2026 and are **only tested against the simulated processor** in `tests/` so far.
+
+| Version | What changed | Real processor |
+|---|---|---|
+| [1.10.0](https://github.com/stargazer992/crestron-pac2m-ha/releases/tag/v1.10.0) ([PR #3](https://github.com/stargazer992/crestron-pac2m-ha/pull/3)) | Configure > *Learn a keypad button* / *Remove keypad buttons* (named press/release event entities, no code change). Address and label warnings moved to Settings > Repairs; the address one has a Fix button (runs Go stand-alone after you confirm). Lights put in the HA area named like their room, once per light. Optional `crestron_pac2m_lights.yaml` light table. *Refresh after a Home Assistant restart* setting (off by default). Integration icon, Dependabot | not tested |
+| [1.9.0](https://github.com/stargazer992/crestron-pac2m-ha/releases/tag/v1.9.0) ([PR #2](https://github.com/stargazer992/crestron-pac2m-ha/pull/2)) | `refresh_from_processor` service (go silent so the processor sends fresh levels). **Digital join** event entity. Download diagnostics. Link sensor unique id tied to the entry (entity id kept). GitHub Actions: Ruff, tests, hassfest, HACS. All Ruff warnings fixed | not tested |
+| [1.8.0](https://github.com/stargazer992/crestron-pac2m-ha/releases/tag/v1.8.0) ([PR #1](https://github.com/stargazer992/crestron-pac2m-ha/pull/1)) | Add Integration finds the processor on the network (telnet prompt, read only). Reconfigure changes the processor address without removing the integration | not tested |
+| 1.7.0 (PR #1) | A light command with no ack is sent once more; frames the processor resends are handled once. Warning when the processor points at an old HA address. Label check says `no_dump` after an HA restart instead of "0 mismatches". Phone notification service setting. Address overrides must be IPv4 and can be cleared | not tested |
+| 1.6.1 (PR #1) | Keypad events work after an HA restart (no hello needed). Plain *turn on* returns to the restored level, not 100%. The automatic undo can no longer be skipped if the console drops while waiting for ONLINE | not tested |
+| 1.6.0 | `crestron_pac2m_digital` events for capturing keypad joins | - |
+| 1.0-1.5 | Light control, Control4/stand-alone switching with automatic undo, entity id takeover, label check, state restore after restart | verified |
+
+Still open (needs the real system):
+* Check that the network search finds the PAC2M and that `commands_resent` on the Link sensor stays near 0.
+* Press a keypad button and check the Digital join entity; then learn it as a named button.
+* Run *Refresh from processor* (dry run off) and see whether the Link sensor's `refresh` ends as `dump_received`. Only if it does, tick *Refresh after a Home Assistant restart*.
+* Real keypad join map: none captured yet.
+
+Details of each version: [docs/lessons_learned.md](docs/lessons_learned.md) sections 16-20.
+
 ## Documentation
 * [docs/lessons_learned.md](docs/lessons_learned.md) - everything learned about controlling the Crestron (read this first)
 * [docs/udp_protocol.md](docs/udp_protocol.md) - frame and payload formats
