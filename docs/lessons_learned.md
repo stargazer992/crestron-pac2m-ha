@@ -207,3 +207,10 @@ Every digital join the processor sends (after the state dump has settled; the ke
 - `crestron_pac2m_lights.yaml` replaces `LIGHTS` completely (no merging). It is validated (join range, `light.` entity ids, kind, duplicates); a bad file is a setup error rather than a silent fallback, so a typo can't make lights disappear.
 - Refresh after a Home Assistant restart is opt-in (`refresh_after_restart`), because refresh itself is unverified on the real processor. The trigger is "link up, no hello received, 30 s later".
 
+## 21. A restored "on" that never clears (found live 2026-11-16, fixed in v1.10.1)
+- Symptom: three lights (0x0116, 0x0117, 0x011D) showed 100% for days while they were off, and "off" from Home Assistant changed nothing on screen. Attribute `crestron_level_source` was `restored` the whole time.
+- Cause 1: the restored value was checked before "not in the dump = off" (section 15), so a hello + dump that left the light out could not correct it.
+- Cause 2: the processor sends no feedback when a command does not change the level, so "off" to a light that is already off never produced a report, and the state only ever changed on feedback.
+- Fix: after a completed dump a light without a level is off (`assumed_off`) whatever was restored. A command to a light the processor has not reported yet sets the shown level to the commanded one; real feedback replaces it.
+- Workaround used on the day: set the light to about 1% and then off, which forces feedback.
+- Limit: with no dump (plain Home Assistant restart) a wrong restored value still shows until the light is commanded or changes.
