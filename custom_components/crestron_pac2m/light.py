@@ -61,10 +61,10 @@ class CrestronLight(LightEntity, RestoreEntity):
     @property
     def _level(self) -> int | None:
         level = self._client.levels.get(self._join)
+        if level is None and self._client.dump_complete:
+            return 0                                 # not in the dump = off; a fresh dump outranks the value from before a restart
         if level is None:
             level = self._restored_level
-        if level is None and self._client.dump_complete:
-            level = 0                                # not in the dump = off
         return level
 
     @property
@@ -79,7 +79,7 @@ class CrestronLight(LightEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"crestron_join": f"0x{self._join:04X}", "crestron_label": self._client.labels.get(self._join, self._label), "crestron_level": self._level, "crestron_level_source": "processor" if self._join in self._client.levels else ("restored" if self._restored_level is not None else ("assumed_off" if self._client.dump_complete else None))}
+        return {"crestron_join": f"0x{self._join:04X}", "crestron_label": self._client.labels.get(self._join, self._label), "crestron_level": self._level, "crestron_level_source": "processor" if self._join in self._client.levels else ("assumed_off" if self._client.dump_complete else ("restored" if self._restored_level is not None else None))}
 
     async def async_added_to_hass(self) -> None:
         # After a Home Assistant restart the processor does not repeat its state dump, so start from the last known state;
@@ -122,3 +122,11 @@ class CrestronLight(LightEntity, RestoreEntity):
             await self._client.async_set_level(self._join, level)
         except ConnectionError as err:
             raise HomeAssistantError(f"Crestron link is down: {err}") from err
+        if self._join not in self._client.levels:
+            # The processor has not reported this light since the restart, and it sends no feedback when a command leaves
+            # the level unchanged (e.g. "off" to a light that is already off). Without this the value from before the
+            # restart would stay on screen forever. Real feedback, when it comes, replaces it.
+            self._restored_level = level
+            if level:
+                self._last_level = level
+            self.async_write_ha_state()

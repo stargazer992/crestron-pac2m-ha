@@ -245,6 +245,39 @@ async def test_state_restored_after_restart_without_dump(hass, processor):
     assert await wait_state(hass, "light.crestron_pac2m_theater_downlights", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "processor")
 
 
+async def test_dump_outranks_restored_state(hass, processor, monkeypatch):
+    """Found live 2026-11-16: lights restored as "on" stayed on after a fresh dump that left them out (= they are off)."""
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+
+    from custom_components.crestron_pac2m import client as client_module
+    monkeypatch.setattr(client_module, "DUMP_SETTLE_SECONDS", 0.3)
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    mock_restore_cache(hass, [State("light.crestron_pac2m_kitchen_kitchen_stove", "on", {"brightness": 255})])
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "light.crestron_pac2m_kitchen_kitchen_stove", lambda s: s.state == "on" and s.attributes["crestron_level_source"] == "restored")
+    processor.send_data(bytes([2, 3, 0]))              # hello: a new session; the dump that follows leaves this light out
+    processor.dump()
+    assert await wait_state(hass, "light.crestron_pac2m_kitchen_kitchen_stove", lambda s: s.state == "off" and s.attributes["crestron_level_source"] == "assumed_off")
+
+
+async def test_off_command_clears_stale_restored_state(hass, processor):
+    """No dump after a restart and the light is really off: "off" gets no feedback, the state must still follow the command."""
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+    processor.table_ip = HA_IP
+    processor.keepalive_seen = True
+    processor.resync_dumps = False
+    processor.levels[0x117] = 0                        # really off
+    mock_restore_cache(hass, [State("light.crestron_pac2m_kitchen_kitchen_stove", "on", {"brightness": 255})])
+    await setup_entry(hass, mode=MODE_STANDALONE)
+    assert await wait_state(hass, "light.crestron_pac2m_kitchen_kitchen_stove", lambda s: s.state == "on")
+    await hass.services.async_call("light", "turn_off", {"entity_id": "light.crestron_pac2m_kitchen_kitchen_stove"}, blocking=True)
+    assert await wait_state(hass, "light.crestron_pac2m_kitchen_kitchen_stove", lambda s: s.state == "off" and s.attributes["crestron_level_source"] == "restored")
+
+
 async def test_keypad_events_after_restart_without_dump(hass, processor):
     """Real behavior: after a Home Assistant restart no hello arrives; keypad presses must still become events."""
     from custom_components.crestron_pac2m import protocol
@@ -296,7 +329,8 @@ async def test_lost_command_is_sent_once_more(hass, processor):
     entry = await _restarted_standalone(hass, processor)
     processor.drop_analog = 1
     await hass.services.async_call("light", "turn_on", {"entity_id": "light.crestron_pac2m_theater_sconces_2", "brightness": 128}, blocking=True)
-    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("brightness") == 128)
+    # wait for the processor's own feedback: the state follows the command at once for a light it has not reported yet
+    assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.attributes.get("brightness") == 128 and s.attributes.get("crestron_level_source") == "processor")
     assert processor.levels[0x127] == 128 * 257 and entry.runtime_data.client.resends == 1
     await hass.services.async_call("light", "turn_off", {"entity_id": "light.crestron_pac2m_theater_sconces_2"}, blocking=True)
     assert await wait_state(hass, "light.crestron_pac2m_theater_sconces_2", lambda s: s.state == "off")
